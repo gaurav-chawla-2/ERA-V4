@@ -67,20 +67,19 @@ This project implements a lightweight Convolutional Neural Network (CNN) for MNI
 ## Model Architecture
 The model uses a carefully designed CNN architecture with the following key components:
 
-1. 1.
-   Convolutional Layers :
+1. Convolutional Layers :
    
    - 5 convolutional layers with strategic padding and channel sizes
    - Pointwise (1x1) convolutions to reduce parameters
    - Residual connection to improve gradient flow
-2. 2.
-   Regularization Techniques :
+
+2. Regularization Techniques :
    
    - Batch Normalization after each convolutional layer
    - Dropout (3%) to prevent overfitting
    - Weight decay (2e-4) in the optimizer
-3. 3.
-   Pooling Layers :
+
+3. Pooling Layers :
    
    - Two MaxPool2d layers to reduce spatial dimensions
    - Global Average Pooling at the end to reduce parameters
@@ -129,16 +128,11 @@ To improve model generalization with limited training:
 - Random affine transformations (translation and scaling)
 - Normalization with MNIST dataset statistics
 ## Key Design Decisions
-1. 1.
-   Residual Connection : Improves gradient flow and helps with faster training
-2. 2.
-   Low Dropout Rate (3%) : Provides regularization without excessive information loss
-3. 3.
-   1x1 Convolutions : Reduces parameters while maintaining expressiveness
-4. 4.
-   OneCycleLR Scheduler : Enables higher learning rates with controlled convergence
-5. 5.
-   Batch Normalization : Stabilizes training and allows for higher learning rates
+1. Residual Connection : Improves gradient flow and helps with faster training
+2. Low Dropout Rate (3%) : Provides regularization without excessive information loss
+3. 1x1 Convolutions : Reduces parameters while maintaining expressiveness
+4. OneCycleLR Scheduler : Enables higher learning rates with controlled convergence
+5. Batch Normalization : Stabilizes training and allows for higher learning rates
 ## Performance
 The model achieves high accuracy on the MNIST dataset in a single epoch:
 
@@ -146,8 +140,10 @@ The model achieves high accuracy on the MNIST dataset in a single epoch:
 - Test Accuracy : ~95% (meets the target requirement)
 
 ## Project Structure
+```
 ├── model.py       # Model architecture definition
 ├── train.py       # Training script
 ├── requirements.txt  # Required packages
 ├── setup.sh       # Setup script
 └── mnist_model.pth   # Saved model weights
+```
