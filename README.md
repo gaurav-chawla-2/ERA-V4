@@ -84,7 +84,7 @@ The model uses a carefully designed CNN architecture with the following key comp
    - Two MaxPool2d layers to reduce spatial dimensions
    - Global Average Pooling at the end to reduce parameters
 
-
+```
    Net(
   (conv1): Conv2d(1, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))  # 28x28x16
   (bn1): BatchNorm2d(16)
@@ -110,7 +110,7 @@ The model uses a carefully designed CNN architecture with the following key comp
   (conv5): Conv2d(24, 10, kernel_size=(1, 1), stride=(1, 1))  # 7x7x10
   (gap): AdaptiveAvgPool2d(output_size=1)  # 1x1x10
 )
-
+```
 
 Total Parameters : 8,530 (well under the 25,000 limit)
 
