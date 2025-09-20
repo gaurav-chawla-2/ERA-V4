@@ -6,7 +6,49 @@ This project implements a CNN model for the MNIST dataset with the following con
 
 ## Setup
 
-### Virtual Environment
+### Option 1: Docker (Recommended)
+
+The easiest way to run this project is using Docker:
+
+```bash
+# Build the Docker image
+docker-compose build mnist-trainer
+
+# Run training
+docker-compose up mnist-trainer
+
+# Or use the convenience script
+chmod +x docker-run.sh
+./docker-run.sh build
+./docker-run.sh train
+```
+
+#### Docker Commands
+
+```bash
+# Build the image
+./docker-run.sh build
+
+# Run training
+./docker-run.sh train
+
+# Start development container (for interactive work)
+./docker-run.sh dev
+
+# Open shell in development container
+./docker-run.sh shell
+
+# Run with GPU support (requires NVIDIA Docker)
+./docker-run.sh gpu
+
+# Stop all containers
+./docker-run.sh stop
+
+# Clean up containers and images
+./docker-run.sh clean
+```
+
+### Option 2: Virtual Environment
 
 It's recommended to use a virtual environment to keep dependencies isolated:
 
@@ -24,7 +66,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Manual Installation
+### Option 3: Manual Installation
 
 Alternatively, you can install the dependencies directly:
 
@@ -42,11 +84,35 @@ The model uses a lightweight CNN architecture with the following key features:
 
 ## Usage
 
-To train and test the model:
+### Local Execution
+
+To train and test the model locally:
 
 ```bash
 python3 train.py
 ```
+
+### Docker Execution
+
+To train and test the model using Docker:
+
+```bash
+# Quick training
+docker-compose up mnist-trainer
+
+# Or using the script
+./docker-run.sh train
+```
+
+## Docker Features
+
+- **Isolated Environment**: Consistent Python environment across different systems
+- **Volume Mounting**: Data persistence and code synchronization
+- **Development Mode**: Interactive container for debugging and experimentation
+- **GPU Support**: Optional GPU acceleration (requires NVIDIA Docker runtime)
+- **Easy Cleanup**: Simple commands to clean up containers and images
+
+## Project Structure
 
 ## Model Performance
 

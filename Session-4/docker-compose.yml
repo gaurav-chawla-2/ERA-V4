@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  mnist-trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mnist-training
+    volumes:
+      # Mount data directory to persist MNIST dataset
+      - ./data:/app/data
+      # Mount current directory to sync code changes during development
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Override default command for interactive development
+    # command: python train.py
+    
+  # Optional: Add a development service for interactive work
+  mnist-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mnist-dev
+    volumes:
+      - ./data:/app/data
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Keep container running for interactive use
+    command: tail -f /dev/null
+    stdin_open: true
+    tty: true
+
+  # Optional: Add a service with GPU support (if available)
+  mnist-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mnist-gpu
+    volumes:
+      - ./data:/app/data
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Uncomment the following lines if you have NVIDIA Docker runtime
+    # runtime: nvidia
+    # environment:
+    #   - NVIDIA_VISIBLE_DEVICES=all
+    command: python train.py
