@@ -59,6 +59,7 @@ OptimizedMNISTNet(
 
 Total Parameters: ~15,000 (Under 20k requirement)
 
+# Final Evaluation 
 ```
 Final Evaluation (Best model from epoch 19):
 
