@@ -1,6 +1,6 @@
-# ResNet50 Mini-ImageNet Training
+# ResNet50 Tiny-ImageNet-200 Training
 
-A clean, single-file implementation for training ResNet50 on the Mini-ImageNet dataset with automatic learning rate optimization using ATOM optimizer.
+A clean, single-file implementation for training ResNet50 on the Tiny-ImageNet-200 dataset with automatic learning rate optimization using ATOM optimizer.
 
 ## 🎯 Features
 
@@ -9,7 +9,7 @@ A clean, single-file implementation for training ResNet50 on the Mini-ImageNet d
 - **Comprehensive Logging**: Training progress, validation graphs, and performance metrics
 - **Early Feedback**: Progress monitoring within 6-10 epochs
 - **Modular Design**: Easy parameter modification without code changes
-- **Target**: ~80% accuracy on Mini-ImageNet
+- **Target**: ~80% accuracy on Tiny-ImageNet-200 (200 classes, 64x64 images)
 
 ## 🚀 Quick Start
 
@@ -19,16 +19,21 @@ A clean, single-file implementation for training ResNet50 on the Mini-ImageNet d
 pip install -r requirements.txt
 ```
 
-### 2. Setup Dataset
+### 2. Download Tiny-ImageNet-200 Dataset
 
+**Option A: Automated Setup (Recommended)**
 ```bash
-python setup_dataset.py
+# Run with sudo for /opt/dlami/nvme access
+sudo bash setup_tiny_imagenet.sh
 ```
 
-Choose from:
-- **Option 1**: Automatic download using Kaggle API (recommended)
-- **Option 2**: Create sample dataset for testing
-- **Option 3**: Manual download instructions
+**Option B: Manual Download**
+```bash
+# Download dataset manually
+sudo python3 download_tiny_imagenet.py
+```
+
+This will download the Tiny-ImageNet-200 dataset (~237MB) to `/opt/dlami/nvme/tiny-imagenet-200/`
 
 ### 3. Start Training
 

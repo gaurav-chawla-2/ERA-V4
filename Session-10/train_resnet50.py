@@ -35,11 +35,11 @@ warnings.filterwarnings('ignore')
 # ============================================================================
 
 # Dataset Configuration
-DATASET_PATH = "./drive/MyDrive/imagenet-tiny/tiny-imagenet-200"  # Path to Tiny-ImageNet dataset
+DATASET_PATH = "/opt/dlami/nvme/tiny-imagenet-200"  # Path to Tiny-ImageNet dataset
 NUM_CLASSES = 200  # Tiny-ImageNet has 200 classes
 IMAGE_SIZE = 64    # Tiny-ImageNet uses 64x64 images
-BATCH_SIZE = 64    # Reduced batch size for better convergence
-NUM_WORKERS = 4    # Number of data loading workers
+BATCH_SIZE = 128   # Increased for faster training and better GPU utilization
+NUM_WORKERS = 8    # Increased for faster data loading
 
 # Training Configuration
 MAX_EPOCHS = 50           # Maximum training epochs
@@ -49,14 +49,14 @@ TARGET_ACCURACY = 80.0   # Target accuracy percentage
 VALIDATION_SPLIT = 0.2    # Validation split ratio
 
 # Model Configuration
-DROPOUT_RATE = 0.2        # Dropout rate for regularization
-LABEL_SMOOTHING = 0.05    # Label smoothing for better generalization
+DROPOUT_RATE = 0.1        # Further reduced for faster learning
+LABEL_SMOOTHING = 0.0     # Disabled for faster convergence
 
 # Optimizer Configuration
 OPTIMIZER_TYPE = 'AdamW'  # Options: 'SGD', 'AdamW'
-INITIAL_LR = 1e-3         # Stable initial learning rate
+INITIAL_LR = 1e-3         # Increased for faster convergence
 MOMENTUM = 0.9            # Momentum for SGD optimizer
-WEIGHT_DECAY = 1e-4       # Weight decay for regularization
+WEIGHT_DECAY = 1e-5       # Minimal weight decay for speed
 
 # Logging and Visualization
 SAVE_DIR = "./results"    # Directory to save results
@@ -667,8 +667,11 @@ def main():
     criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
     optimizer = create_optimizer(model.parameters(), OPTIMIZER_TYPE, INITIAL_LR, MOMENTUM, WEIGHT_DECAY)
     
-    # Simple cosine annealing scheduler (no warmup for stability)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS, eta_min=INITIAL_LR/100)
+    # Warmup + cosine annealing for faster convergence with higher LR
+    warmup_epochs = 2
+    main_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS-warmup_epochs, eta_min=INITIAL_LR/100)
+    warmup_scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=warmup_epochs)
+    scheduler = optim.lr_scheduler.SequentialLR(optimizer, [warmup_scheduler, main_scheduler], milestones=[warmup_epochs])
     
     # Training tracking
     train_losses, train_accs = [], []
