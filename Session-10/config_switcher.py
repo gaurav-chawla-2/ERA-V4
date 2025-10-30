@@ -13,7 +13,7 @@ from pathlib import Path
 # Configuration presets
 CONFIGS = {
     'tiny-imagenet': {
-        'DATASET_PATH': '"/opt/dlami/nvme/tiny-imagenet-200"',
+        'DATASET_PATH': '"/data/tiny-imagenet-200"',
         'NUM_CLASSES': '200',
         'IMAGE_SIZE': '64',
         'BATCH_SIZE': '128',

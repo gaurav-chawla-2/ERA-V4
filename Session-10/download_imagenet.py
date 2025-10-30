@@ -133,11 +133,12 @@ def print_download_instructions():
 
 def create_validation_script():
     """Create a script to organize validation data"""
-    script_content = '''#!/bin/bash
+    dataset_path = os.path.join(DOWNLOAD_DIR, DATASET_NAME)
+    script_content = f'''#!/bin/bash
 # Script to organize ImageNet validation data into class folders
 
-VALDIR="/opt/dlami/nvme/imagenet/val"
-DEVKIT="/opt/dlami/nvme/imagenet/ILSVRC2012_devkit_t12"
+VALDIR="{dataset_path}/val"
+DEVKIT="{dataset_path}/ILSVRC2012_devkit_t12"
 
 if [ ! -d "$VALDIR" ]; then
     echo "Validation directory not found: $VALDIR"
@@ -169,7 +170,8 @@ done < "$DEVKIT/data/ILSVRC2012_validation_ground_truth.txt"
 echo "Validation data organization complete!"
 '''
     
-    script_path = "/Users/gc/Documents/code/ERA/ERA-V4/Session-10/organize_imagenet_val.sh"
+    # Use current directory for the script
+    script_path = os.path.join(os.getcwd(), "organize_imagenet_val.sh")
     with open(script_path, 'w') as f:
         f.write(script_content)
     
