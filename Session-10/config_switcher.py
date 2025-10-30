@@ -31,7 +31,8 @@ CONFIGS = {
         'DATASET_PATH': '"/data/imagenet"',
         'NUM_CLASSES': '1000',
         'IMAGE_SIZE': '224',
-        'BATCH_SIZE': '64',
+        'BATCH_SIZE': '96',   # Optimized for T4 GPU (16GB VRAM) on g4dn.xlarge
+        'NUM_WORKERS': '4',   # Matched to 4 vCPUs on g4dn.xlarge
         'MAX_EPOCHS': '100',
         'EARLY_STOP_PATIENCE': '15',
         'MIN_EPOCHS_FOR_FEEDBACK': '10',
@@ -40,7 +41,8 @@ CONFIGS = {
         'LABEL_SMOOTHING': '0.1',
         'OPTIMIZER_TYPE': "'SGD'",
         'INITIAL_LR': '0.1',
-        'WEIGHT_DECAY': '1e-3'
+        'WEIGHT_DECAY': '1e-3',
+        'USE_MIXED_PRECISION': 'True'  # Enable FP16 for T4 GPU optimization
     }
 }
 

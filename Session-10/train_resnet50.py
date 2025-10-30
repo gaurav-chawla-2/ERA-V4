@@ -19,6 +19,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
+from torch.cuda.amp import autocast, GradScaler
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -28,6 +29,8 @@ from pathlib import Path
 from typing import Tuple, List, Dict, Optional
 import warnings
 from PIL import Image
+import logging
+from datetime import datetime
 warnings.filterwarnings('ignore')
 
 # ============================================================================
@@ -38,8 +41,8 @@ warnings.filterwarnings('ignore')
 DATASET_PATH = "/opt/dlami/nvme/imagenet"  # Path to ImageNet dataset (change to tiny-imagenet-200 for Tiny-ImageNet)
 NUM_CLASSES = 1000  # ImageNet has 1000 classes (change to 200 for Tiny-ImageNet)
 IMAGE_SIZE = 224    # ImageNet uses 224x224 images (change to 64 for Tiny-ImageNet)
-BATCH_SIZE = 64     # Reduced for full ImageNet due to memory constraints
-NUM_WORKERS = 8     # Increased for faster data loading
+BATCH_SIZE = 96     # Optimized for T4 GPU (16GB VRAM) on g4dn.xlarge
+NUM_WORKERS = 4     # Matched to 4 vCPUs on g4dn.xlarge instance
 
 # Training Configuration
 MAX_EPOCHS = 100          # Maximum training epochs (increased for full ImageNet)
@@ -62,6 +65,9 @@ WEIGHT_DECAY = 1e-3       # Standard weight decay for ImageNet
 SAVE_DIR = "./results"    # Directory to save results
 LOG_INTERVAL = 10         # Log every N batches
 PLOT_STYLE = 'seaborn-v0_8'  # Matplotlib style
+
+# Mixed Precision Training Configuration (optimized for T4 GPU)
+USE_MIXED_PRECISION = True        # Enable automatic mixed precision for faster training
 
 # Checkpoint Configuration
 CHECKPOINT_DIR = "./checkpoints"  # Directory to save checkpoints
@@ -437,64 +443,126 @@ def create_data_loaders() -> Tuple[DataLoader, DataLoader, int]:
 # ============================================================================
 
 def train_epoch(model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, 
-                criterion: nn.Module, device: torch.device, epoch: int) -> Tuple[float, float]:
-    """Train for one epoch"""
+                criterion: nn.Module, device: torch.device, epoch: int, 
+                scaler: GradScaler = None) -> Tuple[float, float, float]:
+    """Train for one epoch with mixed precision support"""
     
     model.train()
     running_loss = 0.0
-    correct = 0
+    correct_top1 = 0
+    correct_top5 = 0
     total = 0
+    
+    # Initialize scaler if not provided and mixed precision is enabled
+    if USE_MIXED_PRECISION and scaler is None:
+        scaler = GradScaler()
     
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         
         optimizer.zero_grad()
-        output = model(data)
-        loss = criterion(output, target)
-        loss.backward()
-        optimizer.step()
+        
+        if USE_MIXED_PRECISION:
+            # Mixed precision forward pass
+            with autocast():
+                output = model(data)
+                loss = criterion(output, target)
+            
+            # Mixed precision backward pass
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            # Standard precision training
+            output = model(data)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer.step()
+        
+        # Calculate Top-1 and Top-5 accuracy
+        _, pred_top5 = output.topk(5, 1, True, True)
+        pred_top5 = pred_top5.t()
+        correct_batch = pred_top5.eq(target.view(1, -1).expand_as(pred_top5))
+        
+        # Top-1 accuracy
+        correct_top1 += correct_batch[:1].reshape(-1).float().sum(0).item()
+        
+        # Top-5 accuracy
+        correct_top5 += correct_batch[:5].reshape(-1).float().sum(0).item()
         
         # Statistics
         running_loss += loss.item()
-        _, predicted = output.max(1)
         total += target.size(0)
-        correct += predicted.eq(target).sum().item()
         
         # Logging
         if batch_idx % LOG_INTERVAL == 0:
+            current_top1 = 100. * correct_top1 / total
+            current_top5 = 100. * correct_top5 / total
+            precision_str = "FP16" if USE_MIXED_PRECISION else "FP32"
             print(f'   Batch {batch_idx:3d}/{len(train_loader):3d} | '
                   f'Loss: {loss.item():.4f} | '
-                  f'Acc: {100.*correct/total:.2f}%')
+                  f'Top-1: {current_top1:.2f}% | '
+                  f'Top-5: {current_top5:.2f}% | {precision_str}')
     
     epoch_loss = running_loss / len(train_loader)
-    epoch_acc = 100. * correct / total
+    epoch_top1_acc = 100. * correct_top1 / total
+    epoch_top5_acc = 100. * correct_top5 / total
+    
+    # Log epoch summary
+    precision_str = "FP16" if USE_MIXED_PRECISION else "FP32"
+    logging.info(f"Train Epoch {epoch}: Loss={epoch_loss:.4f}, Top-1 Acc={epoch_top1_acc:.2f}%, Top-5 Acc={epoch_top5_acc:.2f}% ({precision_str})")
+    
+    return epoch_loss, epoch_top1_acc, epoch_top5_acc
     
     return epoch_loss, epoch_acc
 
 def validate_epoch(model: nn.Module, val_loader: DataLoader, criterion: nn.Module, 
-                  device: torch.device) -> Tuple[float, float]:
-    """Validate for one epoch"""
+                  device: torch.device) -> Tuple[float, float, float]:
+    """Validate for one epoch with mixed precision support"""
     
     model.eval()
     running_loss = 0.0
-    correct = 0
+    correct_top1 = 0
+    correct_top5 = 0
     total = 0
     
     with torch.no_grad():
         for data, target in val_loader:
             data, target = data.to(device), target.to(device)
-            output = model(data)
-            loss = criterion(output, target)
+            
+            if USE_MIXED_PRECISION:
+                # Mixed precision inference
+                with autocast():
+                    output = model(data)
+                    loss = criterion(output, target)
+            else:
+                # Standard precision inference
+                output = model(data)
+                loss = criterion(output, target)
+            
+            # Calculate Top-1 and Top-5 accuracy
+            _, pred_top5 = output.topk(5, 1, True, True)
+            pred_top5 = pred_top5.t()
+            correct_batch = pred_top5.eq(target.view(1, -1).expand_as(pred_top5))
+            
+            # Top-1 accuracy
+            correct_top1 += correct_batch[:1].reshape(-1).float().sum(0).item()
+            
+            # Top-5 accuracy
+            correct_top5 += correct_batch[:5].reshape(-1).float().sum(0).item()
             
             running_loss += loss.item()
-            _, predicted = output.max(1)
             total += target.size(0)
-            correct += predicted.eq(target).sum().item()
     
     epoch_loss = running_loss / len(val_loader)
-    epoch_acc = 100. * correct / total
+    epoch_top1_acc = 100. * correct_top1 / total
+    epoch_top5_acc = 100. * correct_top5 / total
     
-    return epoch_loss, epoch_acc
+    # Log validation summary
+    precision_str = "FP16" if USE_MIXED_PRECISION else "FP32"
+    logging.info(f"Validation: Loss={epoch_loss:.4f}, Top-1 Acc={epoch_top1_acc:.2f}%, Top-5 Acc={epoch_top5_acc:.2f}% ({precision_str})")
+    
+    return epoch_loss, epoch_top1_acc, epoch_top5_acc
 
 # ============================================================================
 # VISUALIZATION AND LOGGING FUNCTIONS
@@ -805,9 +873,15 @@ def find_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
 def main():
     """Main training function"""
     
+    # Setup logging first
+    logger = setup_logging()
+    
     dataset_name = "Tiny-ImageNet" if 'tiny-imagenet' in DATASET_PATH.lower() else "ImageNet"
     print(f"🚀 Starting ResNet50 Training on {dataset_name}")
     print("="*60)
+    
+    logger.info(f"Starting ResNet50 Training on {dataset_name}")
+    logger.info("="*60)
     
     # Setup
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -845,6 +919,14 @@ def main():
     print(f"   Optimizer: {OPTIMIZER_TYPE}")
     print(f"   Learning rate: {INITIAL_LR:.2e}")
     print(f"   Weight decay: {WEIGHT_DECAY:.2e}")
+    
+    # Mixed precision setup
+    scaler = None
+    if USE_MIXED_PRECISION and device.type == 'cuda':
+        scaler = GradScaler()
+        print(f"   Mixed Precision: Enabled (FP16) - Optimized for T4 GPU")
+    else:
+        print(f"   Mixed Precision: Disabled (FP32)")
     
     criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
     optimizer = create_optimizer(model.parameters(), OPTIMIZER_TYPE, INITIAL_LR, MOMENTUM, WEIGHT_DECAY)
@@ -898,10 +980,10 @@ def main():
         print("-" * 50)
         
         # Training
-        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device, epoch)
+        train_loss, train_top1, train_top5 = train_epoch(model, train_loader, optimizer, criterion, device, epoch, scaler)
         
         # Validation
-        val_loss, val_acc = validate_epoch(model, val_loader, criterion, device)
+        val_loss, val_top1, val_top5 = validate_epoch(model, val_loader, criterion, device)
         
         # Update scheduler
         scheduler.step()
