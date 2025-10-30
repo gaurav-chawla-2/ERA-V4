@@ -1,15 +1,16 @@
-# ResNet50 Tiny-ImageNet-200 Training
+# ResNet50 ImageNet Training
 
-A clean, single-file implementation for training ResNet50 on the Tiny-ImageNet-200 dataset with automatic learning rate optimization using ATOM optimizer.
+A comprehensive implementation for training ResNet50 on both Tiny-ImageNet-200 and full ImageNet datasets with checkpoint support and automatic configuration switching.
 
 ## 🎯 Features
 
 - **Clear ResNet50 Implementation**: Every layer operation (Conv, BN, MaxPooling, ReLU) is explicitly visible
-- **ATOM Optimizer**: Automatically finds optimal learning rates during training
+- **Dual Dataset Support**: Works with both Tiny-ImageNet-200 and full ImageNet
+- **Checkpoint System**: Automatic saving and resuming of training progress
+- **Configuration Switching**: Easy switching between dataset configurations
 - **Comprehensive Logging**: Training progress, validation graphs, and performance metrics
-- **Early Feedback**: Progress monitoring within 6-10 epochs
+- **Early Feedback**: Progress monitoring and early stopping
 - **Modular Design**: Easy parameter modification without code changes
-- **Target**: ~80% accuracy on Tiny-ImageNet-200 (200 classes, 64x64 images)
 
 ## 🚀 Quick Start
 
@@ -19,40 +20,113 @@ A clean, single-file implementation for training ResNet50 on the Tiny-ImageNet-2
 pip install -r requirements.txt
 ```
 
-### 2. Download Tiny-ImageNet-200 Dataset
+### 2. Choose Your Dataset
 
-**Option A: Automated Setup (Recommended)**
+**Option A: Tiny-ImageNet-200 (Recommended for testing)**
 ```bash
-# Run with sudo for /opt/dlami/nvme access
+# Switch to Tiny-ImageNet configuration
+python config_switcher.py tiny-imagenet
+
+# Download dataset
 sudo bash setup_tiny_imagenet.sh
 ```
 
-**Option B: Manual Download**
+**Option B: Full ImageNet (Production training)**
 ```bash
-# Download dataset manually
-sudo python3 download_tiny_imagenet.py
+# Switch to ImageNet configuration
+python config_switcher.py imagenet
+
+# Get download instructions
+python download_imagenet.py
 ```
 
-This will download the Tiny-ImageNet-200 dataset (~237MB) to `/opt/dlami/nvme/tiny-imagenet-200/`
+### 3. Verify Setup
 
-### 3. Start Training
+```bash
+python verify_setup.py
+```
+
+### 4. Start Training
 
 ```bash
 python train_resnet50.py
 ```
 
+## 📊 Dataset Information
+
+| Dataset | Classes | Image Size | Training Samples | Target Accuracy |
+|---------|---------|------------|------------------|-----------------|
+| Tiny-ImageNet-200 | 200 | 64×64 | ~100,000 | 80% |
+| Full ImageNet | 1000 | 224×224 | ~1.2M | 75% |
+
+## 💾 Checkpoint Management
+
+The training script automatically saves checkpoints for resuming interrupted training:
+
+### Automatic Checkpointing
+- Saves checkpoint every 5 epochs
+- Saves best model checkpoint when validation accuracy improves
+- Automatically resumes from latest checkpoint on restart
+
+### Manual Checkpoint Control
+```bash
+# Resume from specific checkpoint
+RESUME_FROM_CHECKPOINT="./checkpoints/checkpoint_epoch_25.pth" python train_resnet50.py
+
+# Start fresh training (ignore existing checkpoints)
+rm -rf ./checkpoints && python train_resnet50.py
+```
+
+### Checkpoint Contents
+- Model state (weights and biases)
+- Optimizer state (momentum, learning rate schedule)
+- Training history (losses, accuracies)
+- Configuration parameters
+
+## ⚙️ Configuration Management
+
+### Quick Configuration Switching
+```bash
+# Switch to Tiny-ImageNet configuration
+python config_switcher.py tiny-imagenet
+
+# Switch to full ImageNet configuration  
+python config_switcher.py imagenet
+
+# Show current configuration
+python config_switcher.py show
+```
+
+### Manual Configuration
+Edit the configuration section in `train_resnet50.py`:
+```python
+# Dataset Configuration
+DATASET_PATH = "/opt/dlami/nvme/imagenet"  # or tiny-imagenet-200
+NUM_CLASSES = 1000  # or 200 for Tiny-ImageNet
+IMAGE_SIZE = 224    # or 64 for Tiny-ImageNet
+BATCH_SIZE = 64     # Adjust based on GPU memory
+
+# Training Configuration
+MAX_EPOCHS = 100
+TARGET_ACCURACY = 75.0
+OPTIMIZER_TYPE = 'SGD'  # or 'AdamW'
+INITIAL_LR = 0.1
+```
+
 ## 📊 What You'll Get
 
-### Automatic Learning Rate Finding
-- ATOM optimizer scans learning rates from 1e-6 to 1e-1
-- Finds optimal LR automatically
-- Saves LR finder plot for analysis
-
 ### Comprehensive Training Monitoring
-- Real-time training progress
+- Real-time training progress with loss and accuracy
 - Validation accuracy tracking
+- Learning rate scheduling visualization
 - Early stopping when target reached
 - Progress warnings if training stalls
+
+### Automatic Checkpointing
+- Resume training from interruptions
+- Best model preservation
+- Training history preservation
+- Easy experiment management
 
 ### Rich Visualizations
 - Training/validation loss curves

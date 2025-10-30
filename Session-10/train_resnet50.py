@@ -35,33 +35,38 @@ warnings.filterwarnings('ignore')
 # ============================================================================
 
 # Dataset Configuration
-DATASET_PATH = "/opt/dlami/nvme/tiny-imagenet-200"  # Path to Tiny-ImageNet dataset
-NUM_CLASSES = 200  # Tiny-ImageNet has 200 classes
-IMAGE_SIZE = 64    # Tiny-ImageNet uses 64x64 images
-BATCH_SIZE = 128   # Increased for faster training and better GPU utilization
-NUM_WORKERS = 8    # Increased for faster data loading
+DATASET_PATH = "/opt/dlami/nvme/imagenet"  # Path to ImageNet dataset (change to tiny-imagenet-200 for Tiny-ImageNet)
+NUM_CLASSES = 1000  # ImageNet has 1000 classes (change to 200 for Tiny-ImageNet)
+IMAGE_SIZE = 224    # ImageNet uses 224x224 images (change to 64 for Tiny-ImageNet)
+BATCH_SIZE = 64     # Reduced for full ImageNet due to memory constraints
+NUM_WORKERS = 8     # Increased for faster data loading
 
 # Training Configuration
-MAX_EPOCHS = 50           # Maximum training epochs
-EARLY_STOP_PATIENCE = 10  # Early stopping patience
-MIN_EPOCHS_FOR_FEEDBACK = 6  # Minimum epochs before early feedback
-TARGET_ACCURACY = 80.0   # Target accuracy percentage
+MAX_EPOCHS = 100          # Maximum training epochs (increased for full ImageNet)
+EARLY_STOP_PATIENCE = 15  # Early stopping patience (increased for full ImageNet)
+MIN_EPOCHS_FOR_FEEDBACK = 10  # Minimum epochs before early feedback
+TARGET_ACCURACY = 75.0   # Target accuracy percentage (realistic for full ImageNet)
 VALIDATION_SPLIT = 0.2    # Validation split ratio
 
 # Model Configuration
-DROPOUT_RATE = 0.1        # Further reduced for faster learning
-LABEL_SMOOTHING = 0.0     # Disabled for faster convergence
+DROPOUT_RATE = 0.2        # Increased for full ImageNet to prevent overfitting
+LABEL_SMOOTHING = 0.1     # Label smoothing for better generalization
 
 # Optimizer Configuration
-OPTIMIZER_TYPE = 'AdamW'  # Options: 'SGD', 'AdamW'
-INITIAL_LR = 1e-3         # Increased for faster convergence
+OPTIMIZER_TYPE = 'SGD'    # SGD often works better for full ImageNet
+INITIAL_LR = 0.1          # Standard learning rate for ImageNet training
 MOMENTUM = 0.9            # Momentum for SGD optimizer
-WEIGHT_DECAY = 1e-5       # Minimal weight decay for speed
+WEIGHT_DECAY = 1e-3       # Standard weight decay for ImageNet
 
-# Logging and Visualization
+# Logging and Visualization Configuration
 SAVE_DIR = "./results"    # Directory to save results
 LOG_INTERVAL = 10         # Log every N batches
 PLOT_STYLE = 'seaborn-v0_8'  # Matplotlib style
+
+# Checkpoint Configuration
+CHECKPOINT_DIR = "./checkpoints"  # Directory to save checkpoints
+SAVE_CHECKPOINT_EVERY = 5         # Save checkpoint every N epochs
+RESUME_FROM_CHECKPOINT = None     # Path to checkpoint to resume from (None to start fresh)
 
 # ============================================================================
 # CUSTOM DATASET CLASSES
@@ -317,8 +322,12 @@ def create_data_loaders() -> Tuple[DataLoader, DataLoader, int]:
     # Check if dataset exists
     if not os.path.exists(DATASET_PATH):
         print(f"❌ Dataset not found at {DATASET_PATH}")
-        print("Please download the tiny-imagenet dataset and extract it to the specified path.")
+        print("Please download the dataset and extract it to the specified path.")
         raise FileNotFoundError(f"Dataset not found at {DATASET_PATH}")
+    
+    # Detect dataset type
+    is_tiny_imagenet = 'tiny-imagenet' in DATASET_PATH.lower()
+    print(f"🔍 Detected dataset type: {'Tiny-ImageNet' if is_tiny_imagenet else 'Full ImageNet'}")
     
     # Load datasets
     try:
@@ -332,28 +341,47 @@ def create_data_loaders() -> Tuple[DataLoader, DataLoader, int]:
         num_classes = len(train_dataset.classes)
         class_to_idx = train_dataset.class_to_idx
         
-        # Load validation dataset using custom class for proper label alignment
-        val_images_dir = os.path.join(DATASET_PATH, 'val', 'images')
-        val_annotations_file = os.path.join(DATASET_PATH, 'val', 'val_annotations.txt')
-        
-        if os.path.exists(val_annotations_file) and os.path.exists(val_images_dir):
-            print("🔧 Using val_annotations.txt for proper validation label alignment")
-            val_dataset = TinyImageNetValidationDataset(
-                val_dir=val_images_dir,
-                annotations_file=val_annotations_file,
-                class_to_idx=class_to_idx,
-                transform=val_transform
-            )
+        # Load validation dataset - different handling for Tiny-ImageNet vs full ImageNet
+        if is_tiny_imagenet:
+            # Tiny-ImageNet specific validation loading
+            val_images_dir = os.path.join(DATASET_PATH, 'val', 'images')
+            val_annotations_file = os.path.join(DATASET_PATH, 'val', 'val_annotations.txt')
+            
+            if os.path.exists(val_annotations_file) and os.path.exists(val_images_dir):
+                print("🔧 Using val_annotations.txt for Tiny-ImageNet validation")
+                val_dataset = TinyImageNetValidationDataset(
+                    val_dir=val_images_dir,
+                    annotations_file=val_annotations_file,
+                    class_to_idx=class_to_idx,
+                    transform=val_transform
+                )
+            else:
+                print("⚠️  val_annotations.txt not found, falling back to ImageFolder")
+                val_dataset = datasets.ImageFolder(
+                    root=os.path.join(DATASET_PATH, 'val'),
+                    transform=val_transform
+                )
         else:
-            print("⚠️  val_annotations.txt not found, falling back to ImageFolder")
+            # Full ImageNet validation loading
+            val_path = os.path.join(DATASET_PATH, 'val')
+            if not os.path.exists(val_path):
+                # Try alternative validation path names
+                alt_paths = ['validation', 'valid', 'test']
+                for alt in alt_paths:
+                    alt_path = os.path.join(DATASET_PATH, alt)
+                    if os.path.exists(alt_path):
+                        val_path = alt_path
+                        print(f"🔧 Using validation path: {alt}")
+                        break
+            
             val_dataset = datasets.ImageFolder(
-                root=os.path.join(DATASET_PATH, 'val'),
+                root=val_path,
                 transform=val_transform
             )
         
     except Exception as e:
         print(f"❌ Error loading dataset: {e}")
-        print("Expected structure:")
+        print("Expected structure for Tiny-ImageNet:")
         print(f"{DATASET_PATH}/")
         print("  ├── train/")
         print("  │   ├── class1/")
@@ -362,6 +390,16 @@ def create_data_loaders() -> Tuple[DataLoader, DataLoader, int]:
         print("  └── val/")
         print("      ├── images/")
         print("      └── val_annotations.txt")
+        print("\nExpected structure for full ImageNet:")
+        print(f"{DATASET_PATH}/")
+        print("  ├── train/")
+        print("  │   ├── class1/")
+        print("  │   ├── class2/")
+        print("  │   └── ...")
+        print("  └── val/ (or validation/)")
+        print("      ├── class1/")
+        print("      ├── class2/")
+        print("      └── ...")
         raise
     
     # Create data loaders
@@ -619,13 +657,156 @@ def check_early_progress(val_accs: List[float], epoch: int) -> bool:
     return True
 
 # ============================================================================
+# CHECKPOINT MANAGEMENT FUNCTIONS
+# ============================================================================
+
+def save_checkpoint(model: nn.Module, optimizer: optim.Optimizer, scheduler, 
+                   epoch: int, train_losses: List[float], train_accs: List[float],
+                   val_losses: List[float], val_accs: List[float], 
+                   learning_rates: List[float], best_val_acc: float,
+                   checkpoint_dir: str, is_best: bool = False):
+    """
+    Save training checkpoint
+    
+    Args:
+        model: The model to save
+        optimizer: The optimizer state
+        scheduler: The learning rate scheduler
+        epoch: Current epoch
+        train_losses: Training loss history
+        train_accs: Training accuracy history
+        val_losses: Validation loss history
+        val_accs: Validation accuracy history
+        learning_rates: Learning rate history
+        best_val_acc: Best validation accuracy so far
+        checkpoint_dir: Directory to save checkpoint
+        is_best: Whether this is the best model so far
+    """
+    
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+        'train_losses': train_losses,
+        'train_accs': train_accs,
+        'val_losses': val_losses,
+        'val_accs': val_accs,
+        'learning_rates': learning_rates,
+        'best_val_acc': best_val_acc,
+        'config': {
+            'num_classes': NUM_CLASSES,
+            'image_size': IMAGE_SIZE,
+            'batch_size': BATCH_SIZE,
+            'dropout_rate': DROPOUT_RATE,
+            'optimizer_type': OPTIMIZER_TYPE,
+            'initial_lr': INITIAL_LR,
+            'weight_decay': WEIGHT_DECAY,
+            'momentum': MOMENTUM
+        }
+    }
+    
+    # Save regular checkpoint
+    checkpoint_path = os.path.join(checkpoint_dir, f'checkpoint_epoch_{epoch}.pth')
+    torch.save(checkpoint, checkpoint_path)
+    print(f"💾 Checkpoint saved: {checkpoint_path}")
+    
+    # Save best model checkpoint
+    if is_best:
+        best_path = os.path.join(checkpoint_dir, 'best_model_checkpoint.pth')
+        torch.save(checkpoint, best_path)
+        print(f"🏆 Best model checkpoint saved: {best_path}")
+    
+    # Save latest checkpoint (for easy resuming)
+    latest_path = os.path.join(checkpoint_dir, 'latest_checkpoint.pth')
+    torch.save(checkpoint, latest_path)
+
+def load_checkpoint(checkpoint_path: str, model: nn.Module, optimizer: optim.Optimizer = None, 
+                   scheduler = None) -> Dict:
+    """
+    Load training checkpoint
+    
+    Args:
+        checkpoint_path: Path to checkpoint file
+        model: Model to load state into
+        optimizer: Optimizer to load state into (optional)
+        scheduler: Scheduler to load state into (optional)
+        
+    Returns:
+        Dict containing checkpoint information
+    """
+    
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    
+    print(f"📂 Loading checkpoint: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    
+    # Load model state
+    model.load_state_dict(checkpoint['model_state_dict'])
+    print(f"✅ Model state loaded from epoch {checkpoint['epoch']}")
+    
+    # Load optimizer state if provided
+    if optimizer is not None and 'optimizer_state_dict' in checkpoint:
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        print("✅ Optimizer state loaded")
+    
+    # Load scheduler state if provided
+    if scheduler is not None and 'scheduler_state_dict' in checkpoint:
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        print("✅ Scheduler state loaded")
+    
+    return checkpoint
+
+def find_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
+    """
+    Find the latest checkpoint in the checkpoint directory
+    
+    Args:
+        checkpoint_dir: Directory to search for checkpoints
+        
+    Returns:
+        Path to latest checkpoint or None if not found
+    """
+    
+    latest_path = os.path.join(checkpoint_dir, 'latest_checkpoint.pth')
+    if os.path.exists(latest_path):
+        return latest_path
+    
+    # Fallback: find highest epoch checkpoint
+    if not os.path.exists(checkpoint_dir):
+        return None
+    
+    checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.startswith('checkpoint_epoch_') and f.endswith('.pth')]
+    if not checkpoint_files:
+        return None
+    
+    # Extract epoch numbers and find the latest
+    epochs = []
+    for f in checkpoint_files:
+        try:
+            epoch = int(f.split('_')[2].split('.')[0])
+            epochs.append((epoch, f))
+        except:
+            continue
+    
+    if epochs:
+        latest_epoch, latest_file = max(epochs)
+        return os.path.join(checkpoint_dir, latest_file)
+    
+    return None
+
+# ============================================================================
 # MAIN TRAINING FUNCTION
 # ============================================================================
 
 def main():
     """Main training function"""
     
-    print("🚀 Starting ResNet50 Training on Tiny-ImageNet")
+    dataset_name = "Tiny-ImageNet" if 'tiny-imagenet' in DATASET_PATH.lower() else "ImageNet"
+    print(f"🚀 Starting ResNet50 Training on {dataset_name}")
     print("="*60)
     
     # Setup
@@ -637,6 +818,7 @@ def main():
         print(f"🔧 GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
     
     os.makedirs(SAVE_DIR, exist_ok=True)
+    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     
     # Data loading
     print(f"\n📁 Loading dataset from: {DATASET_PATH}")
@@ -673,19 +855,45 @@ def main():
     warmup_scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=warmup_epochs)
     scheduler = optim.lr_scheduler.SequentialLR(optimizer, [warmup_scheduler, main_scheduler], milestones=[warmup_epochs])
     
-    # Training tracking
+    # Check for checkpoint to resume from
+    start_epoch = 1
     train_losses, train_accs = [], []
     val_losses, val_accs = [], []
     learning_rates = []
     best_val_acc = 0.0
     patience_counter = 0
     
-    print(f"\n🎯 Starting training for up to {MAX_EPOCHS} epochs...")
+    # Try to resume from checkpoint
+    resume_path = RESUME_FROM_CHECKPOINT
+    if resume_path is None:
+        resume_path = find_latest_checkpoint(CHECKPOINT_DIR)
+    
+    if resume_path and os.path.exists(resume_path):
+        try:
+            checkpoint = load_checkpoint(resume_path, model, optimizer, scheduler)
+            start_epoch = checkpoint['epoch'] + 1
+            train_losses = checkpoint.get('train_losses', [])
+            train_accs = checkpoint.get('train_accs', [])
+            val_losses = checkpoint.get('val_losses', [])
+            val_accs = checkpoint.get('val_accs', [])
+            learning_rates = checkpoint.get('learning_rates', [])
+            best_val_acc = checkpoint.get('best_val_acc', 0.0)
+            
+            print(f"🔄 Resuming training from epoch {start_epoch}")
+            print(f"🏆 Best validation accuracy so far: {best_val_acc:.2f}%")
+        except Exception as e:
+            print(f"⚠️  Failed to load checkpoint: {e}")
+            print("🔄 Starting fresh training...")
+            start_epoch = 1
+    else:
+        print("🆕 Starting fresh training...")
+    
+    print(f"\n🎯 Training from epoch {start_epoch} to {MAX_EPOCHS}")
     print(f"🎯 Target accuracy: {TARGET_ACCURACY}%")
     start_time = time.time()
     
     # Training loop
-    for epoch in range(1, MAX_EPOCHS + 1):
+    for epoch in range(start_epoch, MAX_EPOCHS + 1):
         print(f"\n📈 Epoch {epoch}/{MAX_EPOCHS}")
         print("-" * 50)
         
@@ -712,7 +920,8 @@ def main():
         print(f"📊 Learning Rate: {current_lr:.2e}")
         
         # Check for best model
-        if val_acc > best_val_acc:
+        is_best = val_acc > best_val_acc
+        if is_best:
             best_val_acc = val_acc
             patience_counter = 0
             torch.save(model.state_dict(), os.path.join(SAVE_DIR, 'best_model.pth'))
@@ -720,14 +929,34 @@ def main():
         else:
             patience_counter += 1
         
+        # Save checkpoint
+        if epoch % SAVE_CHECKPOINT_EVERY == 0 or is_best:
+            save_checkpoint(
+                model, optimizer, scheduler, epoch,
+                train_losses, train_accs, val_losses, val_accs,
+                learning_rates, best_val_acc, CHECKPOINT_DIR, is_best
+            )
+        
         # Early stopping check
         if patience_counter >= EARLY_STOP_PATIENCE:
             print(f"\n⏹️  Early stopping triggered (patience: {EARLY_STOP_PATIENCE})")
+            # Save final checkpoint before stopping
+            save_checkpoint(
+                model, optimizer, scheduler, epoch,
+                train_losses, train_accs, val_losses, val_accs,
+                learning_rates, best_val_acc, CHECKPOINT_DIR, False
+            )
             break
         
         # Target accuracy check
         if val_acc >= TARGET_ACCURACY:
             print(f"\n🎉 Target accuracy {TARGET_ACCURACY}% achieved!")
+            # Save final checkpoint
+            save_checkpoint(
+                model, optimizer, scheduler, epoch,
+                train_losses, train_accs, val_losses, val_accs,
+                learning_rates, best_val_acc, CHECKPOINT_DIR, True
+            )
             break
         
         # Early progress check

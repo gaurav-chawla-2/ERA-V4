@@ -12,18 +12,52 @@ from pathlib import Path
 
 def check_dataset():
     """Check if the dataset is properly downloaded and structured"""
-    dataset_path = "/opt/dlami/nvme/tiny-imagenet-200"
+    # Read dataset path from training script
+    dataset_path = None
+    try:
+        with open('train_resnet50.py', 'r') as f:
+            for line in f:
+                if line.strip().startswith('DATASET_PATH ='):
+                    dataset_path = line.split('=', 1)[1].strip().strip('"\'')
+                    break
+    except:
+        pass
+    
+    if not dataset_path:
+        print("❌ Could not determine dataset path from train_resnet50.py")
+        return False
     
     print("🔍 Checking dataset setup...")
     print(f"📁 Looking for dataset at: {dataset_path}")
     
     if not os.path.exists(dataset_path):
         print("❌ Dataset not found!")
-        print("💡 Run: sudo python3 download_tiny_imagenet.py")
+        if 'tiny-imagenet' in dataset_path.lower():
+            print("💡 Run: sudo python3 download_tiny_imagenet.py")
+        else:
+            print("💡 Run: python3 download_imagenet.py (for instructions)")
         return False
     
+    # Detect dataset type
+    is_tiny_imagenet = 'tiny-imagenet' in dataset_path.lower()
+    dataset_type = "Tiny-ImageNet" if is_tiny_imagenet else "Full ImageNet"
+    expected_classes = 200 if is_tiny_imagenet else 1000
+    
+    print(f"🔍 Detected dataset type: {dataset_type}")
+    
     # Check required directories
-    required_dirs = ['train', 'val', 'test']
+    if is_tiny_imagenet:
+        required_dirs = ['train', 'val', 'test']
+    else:
+        required_dirs = ['train', 'val']
+        # Check for alternative validation directory names
+        if not os.path.exists(os.path.join(dataset_path, 'val')):
+            alt_names = ['validation', 'valid', 'test']
+            for alt in alt_names:
+                if os.path.exists(os.path.join(dataset_path, alt)):
+                    required_dirs = ['train', alt]
+                    break
+    
     for dir_name in required_dirs:
         dir_path = os.path.join(dataset_path, dir_name)
         if os.path.exists(dir_path):
@@ -31,12 +65,15 @@ def check_dataset():
             
             if dir_name == 'train':
                 # Count training classes
-                classes = [d for d in os.listdir(dir_path) 
-                          if os.path.isdir(os.path.join(dir_path, d))]
-                print(f"   📊 Training classes: {len(classes)}")
-                
-                if len(classes) != 200:
-                    print(f"⚠️  Expected 200 classes, found {len(classes)}")
+                try:
+                    classes = [d for d in os.listdir(dir_path) 
+                              if os.path.isdir(os.path.join(dir_path, d))]
+                    print(f"   📊 Training classes: {len(classes)}")
+                    
+                    if len(classes) != expected_classes:
+                        print(f"⚠️  Expected {expected_classes} classes, found {len(classes)}")
+                except Exception as e:
+                    print(f"⚠️  Error reading training directory: {e}")
                 
         else:
             print(f"❌ Missing {dir_name} directory")
