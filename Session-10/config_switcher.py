@@ -28,7 +28,7 @@ CONFIGS = {
         'WEIGHT_DECAY': '1e-5'
     },
     'imagenet': {
-        'DATASET_PATH': '"/data/imagenet"',
+        'DATASET_PATH': '"/data/imagenet"',  # Use dedicated /data mount (280GB available)
         'NUM_CLASSES': '1000',
         'IMAGE_SIZE': '224',
         'BATCH_SIZE': '96',   # Optimized for T4 GPU (16GB VRAM) on g4dn.xlarge

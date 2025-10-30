@@ -15,7 +15,7 @@ import sys
 
 # Configuration
 DATASET_URL = "http://cs231n.stanford.edu/tiny-imagenet-200.zip"
-DOWNLOAD_DIR = "/opt/dlami/nvme"
+DOWNLOAD_DIR = "/data"  # Use dedicated /data mount (280GB available)
 DATASET_NAME = "tiny-imagenet-200"
 ZIP_FILE = "tiny-imagenet-200.zip"
 

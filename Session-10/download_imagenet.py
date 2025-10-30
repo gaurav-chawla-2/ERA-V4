@@ -14,7 +14,7 @@ import shutil
 from pathlib import Path
 
 # Configuration
-DOWNLOAD_DIR = "/data"
+DOWNLOAD_DIR = "/data"  # Use the dedicated /data mount (280GB available)
 DATASET_NAME = "imagenet"
 
 def create_directory(path):
