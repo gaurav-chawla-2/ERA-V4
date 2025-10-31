@@ -135,7 +135,7 @@ class HuggingFaceImageNetDataset(Dataset):
         return image, label
 NUM_CLASSES = 1000  # ImageNet has 1000 classes (change to 200 for Tiny-ImageNet)
 IMAGE_SIZE = 224    # ImageNet uses 224x224 images (change to 64 for Tiny-ImageNet)
-BATCH_SIZE = 64     # Optimized for g4ad.2xlarge (8GB VRAM)
+BATCH_SIZE = 32     # Reduced for debugging (will optimize once GPU is detected)
 NUM_WORKERS = 6     # Optimized for g4ad.2xlarge (8 vCPUs)
 
 # Training Configuration
@@ -1409,13 +1409,24 @@ def main():
     logger.info(f"Starting ResNet50 Training on {dataset_name}")
     logger.info("="*60)
     
-    # Setup
+    # Setup with detailed GPU diagnostics
+    print(f"🔍 PyTorch version: {torch.__version__}")
+    print(f"🔍 CUDA available: {torch.cuda.is_available()}")
+    print(f"🔍 CUDA version: {torch.version.cuda if torch.version.cuda else 'Not available'}")
+    print(f"🔍 Number of GPUs: {torch.cuda.device_count()}")
+    
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"🔧 Device: {device}")
     
     if torch.cuda.is_available():
         print(f"🔧 GPU: {torch.cuda.get_device_name()}")
         print(f"🔧 GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+    else:
+        print("⚠️  GPU not detected. Possible issues:")
+        print("   - CUDA drivers not installed")
+        print("   - PyTorch installed without CUDA support")
+        print("   - AMD GPU requires ROCm (not CUDA)")
+        print("   - Run 'nvidia-smi' to check GPU status")
     
     os.makedirs(SAVE_DIR, exist_ok=True)
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
