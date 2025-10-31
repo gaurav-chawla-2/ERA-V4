@@ -38,7 +38,7 @@ warnings.filterwarnings('ignore')
 # ============================================================================
 
 # Dataset Configuration
-DATASET_PATH = "/data/imagenet"  # Path to ImageNet dataset (change to tiny-imagenet-200 for Tiny-ImageNet)
+DATASET_PATH = "/data/imagenet/full_dataset"  # Path to ImageNet dataset (change to tiny-imagenet-200 for Tiny-ImageNet)
 NUM_CLASSES = 1000  # ImageNet has 1000 classes (change to 200 for Tiny-ImageNet)
 IMAGE_SIZE = 224    # ImageNet uses 224x224 images (change to 64 for Tiny-ImageNet)
 BATCH_SIZE = 96     # Optimized for T4 GPU (16GB VRAM) on g4dn.xlarge
