@@ -74,7 +74,7 @@ CONFIGS = {
     
     'imagenet': {
         # Dataset Configuration
-        'DATASET_PATH': '"/data/imagenet/full_dataset"',
+        'DATASET_PATH': '"/lambda/nfs/ERAv4S09/imagenet/full_dataset"',
         'NUM_CLASSES': '1000',
         'IMAGE_SIZE': '224',
         'VALIDATION_SPLIT': '0.2',

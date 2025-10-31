@@ -96,7 +96,7 @@ def store_optimal_lr(lr):
 # CONFIGURATION PARAMETERS - Modify these for different experiments
 # ============================================================================# Configuration Parameters
 # Dataset Configuration
-DATASET_PATH = "/data/imagenet/full_dataset"  # Path to ImageNet dataset (change to tiny-imagenet-200 for Tiny-ImageNet)
+DATASET_PATH = "/lambda/nfs/ERAv4S09/imagenet/full_dataset"  # Path to ImageNet dataset (change to tiny-imagenet-200 for Tiny-ImageNet)
 
 
 class HuggingFaceImageNetDataset(Dataset):
@@ -195,8 +195,8 @@ class HuggingFaceImageNetDataset(Dataset):
                 image = self.transform(image)
         
         return image, label
-NUM_CLASSES = 1000  # ImageNet has 1000 classes (change to 200 for Tiny-ImageNet)
-IMAGE_SIZE = 224    # ImageNet uses 224x224 images (change to 64 for Tiny-ImageNet)
+NUM_CLASSES = 1000  # ImageNet has 1000 classes
+IMAGE_SIZE = 224    # ImageNet uses 224x224 images
 BATCH_SIZE = 128    # Optimized for A100 40GB - can increase to 256 on H100 80GB
 NUM_WORKERS = 24    # Optimized for high-end instances (26-30 vCPUs available)
 
