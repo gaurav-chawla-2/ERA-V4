@@ -1584,6 +1584,7 @@ def setup_logging() -> logging.Logger:
 
 def main():
     """Main training function"""
+    global NUM_CLASSES, INITIAL_LR
     import argparse
     
     # Parse command line arguments
@@ -1658,7 +1659,6 @@ def main():
     train_loader, val_loader, actual_num_classes = create_data_loaders()
     
     # Update global NUM_CLASSES if different
-    global NUM_CLASSES, INITIAL_LR
     if NUM_CLASSES != actual_num_classes:
         print(f"⚠️  Updating NUM_CLASSES from {NUM_CLASSES} to {actual_num_classes}")
         NUM_CLASSES = actual_num_classes
