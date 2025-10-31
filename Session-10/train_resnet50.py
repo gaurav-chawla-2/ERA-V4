@@ -31,14 +31,108 @@ import warnings
 from PIL import Image
 import logging
 from datetime import datetime
+try:
+    from datasets import load_from_disk
+    HF_DATASETS_AVAILABLE = True
+except ImportError:
+    HF_DATASETS_AVAILABLE = False
 warnings.filterwarnings('ignore')
 
 # ============================================================================
 # CONFIGURATION PARAMETERS - Modify these for different experiments
-# ============================================================================
-
+# ============================================================================# Configuration Parameters
 # Dataset Configuration
 DATASET_PATH = "/data/imagenet/full_dataset"  # Path to ImageNet dataset (change to tiny-imagenet-200 for Tiny-ImageNet)
+
+
+class HuggingFaceImageNetDataset(Dataset):
+    """Custom dataset class for Hugging Face ImageNet datasets with Arrow format."""
+    
+    def __init__(self, dataset_path: str, split: str = 'train', transform=None):
+        """
+        Initialize the Hugging Face ImageNet dataset.
+        
+        Args:
+            dataset_path: Path to the dataset directory
+            split: Dataset split ('train', 'validation', 'test')
+            transform: Torchvision transforms to apply
+        """
+        self.dataset_path = dataset_path
+        self.split = split
+        self.transform = transform
+        
+        if not HF_DATASETS_AVAILABLE:
+            raise ImportError("Hugging Face datasets library not available. Install with: pip install datasets")
+        
+        try:
+            # Load the dataset from disk
+            self.dataset = load_from_disk(dataset_path)
+            
+            # Get the appropriate split
+            if split in self.dataset:
+                self.data = self.dataset[split]
+            else:
+                # Try alternative split names
+                split_mapping = {
+                    'train': ['train', 'training'],
+                    'validation': ['validation', 'val', 'valid'],
+                    'test': ['test', 'testing']
+                }
+                
+                found_split = None
+                for alt_split in split_mapping.get(split, [split]):
+                    if alt_split in self.dataset:
+                        found_split = alt_split
+                        break
+                
+                if found_split is None:
+                    available_splits = list(self.dataset.keys())
+                    raise ValueError(f"Split '{split}' not found. Available splits: {available_splits}")
+                
+                self.data = self.dataset[found_split]
+            
+            # Get class information
+            if hasattr(self.data.features, 'label') and hasattr(self.data.features['label'], 'names'):
+                self.classes = self.data.features['label'].names
+                self.class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
+            else:
+                # Fallback: create classes from unique labels
+                unique_labels = sorted(set(self.data['label']))
+                self.classes = [f"class_{i}" for i in unique_labels]
+                self.class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
+            
+            print(f"✅ Loaded Hugging Face dataset: {len(self.data)} samples, {len(self.classes)} classes")
+            
+        except Exception as e:
+            raise RuntimeError(f"Failed to load Hugging Face dataset from {dataset_path}: {str(e)}")
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        item = self.data[idx]
+        
+        # Get image and label
+        image = item['image']
+        label = item['label']
+        
+        # Convert to PIL Image if needed
+        if not isinstance(image, Image.Image):
+            if isinstance(image, np.ndarray):
+                image = Image.fromarray(image)
+            else:
+                # Handle other formats
+                image = Image.fromarray(np.array(image))
+        
+        # Ensure RGB format
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Apply transforms
+        if self.transform:
+            image = self.transform(image)
+        
+        return image, label
 NUM_CLASSES = 1000  # ImageNet has 1000 classes (change to 200 for Tiny-ImageNet)
 IMAGE_SIZE = 224    # ImageNet uses 224x224 images (change to 64 for Tiny-ImageNet)
 BATCH_SIZE = 96     # Optimized for T4 GPU (16GB VRAM) on g4dn.xlarge
@@ -332,21 +426,179 @@ def create_data_loaders() -> Tuple[DataLoader, DataLoader, int]:
         print("Please download the dataset and extract it to the specified path.")
         raise FileNotFoundError(f"Dataset not found at {DATASET_PATH}")
     
-    # Detect dataset type
+    # Detect dataset type and format
     is_tiny_imagenet = 'tiny-imagenet' in DATASET_PATH.lower()
-    print(f"🔍 Detected dataset type: {'Tiny-ImageNet' if is_tiny_imagenet else 'Full ImageNet'}")
     
-    # Load datasets
-    try:
-        # Load training dataset
-        train_dataset = datasets.ImageFolder(
-            root=os.path.join(DATASET_PATH, 'train'),
-            transform=train_transform
-        )
+    # Check if it's a Hugging Face dataset (has dataset_dict.json or .arrow files)
+    is_hf_dataset = (
+        os.path.exists(os.path.join(DATASET_PATH, 'dataset_dict.json')) or
+        any(f.endswith('.arrow') for f in os.listdir(DATASET_PATH) if os.path.isfile(os.path.join(DATASET_PATH, f)))
+    )
+    
+    if is_hf_dataset:
+        print(f"🔍 Detected dataset format: Hugging Face datasets (Arrow format)")
+        print(f"🔍 Dataset type: {'Tiny-ImageNet' if is_tiny_imagenet else 'Full ImageNet'}")
         
-        # Auto-detect number of classes and get class mapping
-        num_classes = len(train_dataset.classes)
-        class_to_idx = train_dataset.class_to_idx
+        # Load Hugging Face datasets
+        try:
+            train_dataset = HuggingFaceImageNetDataset(
+                dataset_path=DATASET_PATH,
+                split='train',
+                transform=train_transform
+            )
+            
+            val_dataset = HuggingFaceImageNetDataset(
+                dataset_path=DATASET_PATH,
+                split='validation',
+                transform=val_transform
+            )
+            
+            # Get class information from training dataset
+            num_classes = len(train_dataset.classes)
+            class_to_idx = train_dataset.class_to_idx
+            
+        except Exception as e:
+            print(f"❌ Error loading Hugging Face dataset: {str(e)}")
+            raise
+    
+    else:
+        print(f"🔍 Detected dataset format: Standard ImageFolder format")
+        print(f"🔍 Dataset type: {'Tiny-ImageNet' if is_tiny_imagenet else 'Full ImageNet'}")
+        
+        # Load datasets using standard ImageFolder format
+        try:
+            # Load training dataset
+            train_dataset = datasets.ImageFolder(
+                root=os.path.join(DATASET_PATH, 'train'),
+                transform=train_transform
+            )
+            
+            # Auto-detect number of classes and get class mapping
+            num_classes = len(train_dataset.classes)
+            class_to_idx = train_dataset.class_to_idx
+            
+            # Load validation dataset based on dataset type
+            if is_tiny_imagenet:
+                # Tiny-ImageNet has special validation structure
+                val_images_dir = os.path.join(DATASET_PATH, 'val', 'images')
+                val_annotations_file = os.path.join(DATASET_PATH, 'val', 'val_annotations.txt')
+                
+                if os.path.exists(val_annotations_file):
+                    print("📝 Using Tiny-ImageNet validation with annotations")
+                    val_dataset = TinyImageNetValidationDataset(
+                        val_dir=val_images_dir,
+                        annotations_file=val_annotations_file,
+                        class_to_idx=class_to_idx,
+                        transform=val_transform
+                    )
+                else:
+                    print("⚠️  val_annotations.txt not found, falling back to ImageFolder")
+                    val_dataset = datasets.ImageFolder(
+                        root=os.path.join(DATASET_PATH, 'val'),
+                        transform=val_transform
+                    )
+            else:
+                # Full ImageNet validation loading
+                val_path = os.path.join(DATASET_PATH, 'val')
+                if not os.path.exists(val_path):
+                    # Try alternative validation path names
+                    alt_paths = ['validation', 'valid', 'test']
+                    for alt in alt_paths:
+                        alt_path = os.path.join(DATASET_PATH, alt)
+                        if os.path.exists(alt_path):
+                            val_path = alt_path
+                            break
+                    else:
+                        raise FileNotFoundError(f"Validation directory not found. Tried: val, validation, valid, test")
+                
+                val_dataset = datasets.ImageFolder(
+                    root=val_path,
+                    transform=val_transform
+                )
+        
+        except Exception as e:
+            print(f"❌ Error loading dataset: {str(e)}")
+            print("Expected structure for Tiny-ImageNet:")
+            print(f"{DATASET_PATH}/")
+            print("  ├── train/")
+            print("  │   ├── class1/")
+            print("  │   ├── class2/")
+            print("  │   └── ...")
+            print("  └── val/")
+            print("      ├── images/")
+            print("      └── val_annotations.txt")
+            print()
+            print("Expected structure for full ImageNet:")
+            print(f"{DATASET_PATH}/")
+            print("  ├── train/")
+            print("  │   ├── class1/")
+            print("  │   ├── class2/")
+            print("  │   └── ...")
+            print("  └── val/ (or validation/)")
+            print("      ├── class1/")
+            print("      ├── class2/")
+            print("      └── ...")
+            raise
+    
+    # Create data loaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=NUM_WORKERS,
+        pin_memory=True,
+        drop_last=True
+    )
+    
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=NUM_WORKERS,
+        pin_memory=True,
+        drop_last=False
+    )
+    
+    print(f"✅ Dataset loaded successfully!")
+    print(f"   📊 Training samples: {len(train_dataset):,}")
+    print(f"   📊 Validation samples: {len(val_dataset):,}")
+    print(f"   📊 Number of classes: {num_classes}")
+    print(f"   📊 Batch size: {BATCH_SIZE}")
+    
+    return train_loader, val_loader, num_classes
+                split='train',
+                transform=train_transform
+            )
+            
+            val_dataset = HuggingFaceImageNetDataset(
+                dataset_path=DATASET_PATH,
+                split='validation',
+                transform=val_transform
+            )
+            
+            # Get class information from training dataset
+            num_classes = len(train_dataset.classes)
+            class_to_idx = train_dataset.class_to_idx
+            
+        except Exception as e:
+            print(f"❌ Error loading Hugging Face dataset: {str(e)}")
+            raise
+    
+    else:
+        print(f"🔍 Detected dataset format: Standard ImageFolder format")
+        print(f"🔍 Dataset type: {'Tiny-ImageNet' if is_tiny_imagenet else 'Full ImageNet'}")
+        
+        # Load datasets using standard ImageFolder format
+        try:
+            # Load training dataset
+            train_dataset = datasets.ImageFolder(
+                root=os.path.join(DATASET_PATH, 'train'),
+                transform=train_transform
+            )
+            
+            # Auto-detect number of classes and get class mapping
+            num_classes = len(train_dataset.classes)
+            class_to_idx = train_dataset.class_to_idx
         
         # Load validation dataset - different handling for Tiny-ImageNet vs full ImageNet
         if is_tiny_imagenet:
