@@ -186,25 +186,25 @@ class HuggingFaceImageNetDataset(Dataset):
         return image, label
 NUM_CLASSES = 1000  # ImageNet has 1000 classes (change to 200 for Tiny-ImageNet)
 IMAGE_SIZE = 224    # ImageNet uses 224x224 images (change to 64 for Tiny-ImageNet)
-BATCH_SIZE = 16     # Further reduced for g4dn.xlarge NVIDIA T4 GPU memory constraints
-NUM_WORKERS = 4     # Optimized for g4dn.xlarge (4 vCPUs)
+BATCH_SIZE = 128    # Optimized for A100 40GB - can increase to 256 on H100 80GB
+NUM_WORKERS = 24    # Optimized for high-end instances (26-30 vCPUs available)
 
 # Training Configuration
-MAX_EPOCHS = 100          # Maximum training epochs (increased for full ImageNet)
-EARLY_STOP_PATIENCE = 15  # Early stopping patience (increased for full ImageNet)
-MIN_EPOCHS_FOR_FEEDBACK = 10  # Minimum epochs before early feedback
+MAX_EPOCHS = 30           # Reduced epochs - ResNet50 converges by epoch 25-30
+EARLY_STOP_PATIENCE = 8   # Reduced patience for faster convergence detection
+MIN_EPOCHS_FOR_FEEDBACK = 5  # Earlier feedback for faster iteration
 TARGET_ACCURACY = 75.0   # Target accuracy percentage (realistic for full ImageNet)
 VALIDATION_SPLIT = 0.2    # Validation split ratio
 
 # Model Configuration
-DROPOUT_RATE = 0.2        # Increased for full ImageNet to prevent overfitting
+DROPOUT_RATE = 0.1        # Reduced dropout - larger batch size provides regularization
 LABEL_SMOOTHING = 0.1     # Label smoothing for better generalization
 
 # Optimizer Configuration
 OPTIMIZER_TYPE = 'SGD'    # SGD often works better for full ImageNet
-INITIAL_LR = 1.20e-05     # Optimal learning rate found by LR range test
+INITIAL_LR = 0.1          # Higher LR for larger batch size (linear scaling rule)
 MOMENTUM = 0.9            # Momentum for SGD optimizer
-WEIGHT_DECAY = 1e-3       # Standard weight decay for ImageNet
+WEIGHT_DECAY = 1e-4       # Reduced weight decay for larger batch size
 
 # Visualization and Logging
 SAVE_DIR = "./results"    # Directory to save results
@@ -212,8 +212,11 @@ LOG_INTERVAL = 10         # Log every N batches
 PLOT_STYLE = 'seaborn-v0_8'  # Matplotlib style
 PLOT_FREQUENCY = 5        # Generate plots every N epochs (set to 1 for every epoch)
 
-# Mixed Precision Training Configuration (optimized for T4 GPU)
+# Mixed Precision Training Configuration
 USE_MIXED_PRECISION = True        # Enable automatic mixed precision for faster training
+USE_COSINE_ANNEALING = True       # Use cosine annealing scheduler for better convergence
+COSINE_T_MAX = 30                 # T_max for cosine annealing (matches MAX_EPOCHS)
+COSINE_ETA_MIN = 1e-6             # Minimum learning rate for cosine annealing
 
 # Checkpoint Configuration
 CHECKPOINT_DIR = "./checkpoints"  # Directory to save checkpoints
@@ -1492,8 +1495,33 @@ def main():
     print(f"🔧 Device: {device}")
     
     if torch.cuda.is_available():
-        print(f"🔧 GPU: {torch.cuda.get_device_name()}")
-        print(f"🔧 GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        gpu_name = torch.cuda.get_device_name()
+        gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+        print(f"🔧 GPU: {gpu_name}")
+        print(f"🔧 GPU Memory: {gpu_memory_gb:.1f} GB")
+        
+        # Dynamic batch size optimization based on GPU memory
+        global BATCH_SIZE, NUM_WORKERS, INITIAL_LR
+        original_batch_size = BATCH_SIZE
+        
+        if gpu_memory_gb >= 75:  # H100 80GB, B200 180GB
+            BATCH_SIZE = 256
+            NUM_WORKERS = min(32, os.cpu_count())
+            print(f"🚀 High-end GPU detected! Optimizing: BATCH_SIZE={BATCH_SIZE}, NUM_WORKERS={NUM_WORKERS}")
+        elif gpu_memory_gb >= 35:  # A100 40GB, H100 SXM variants
+            BATCH_SIZE = 128
+            NUM_WORKERS = min(24, os.cpu_count())
+            print(f"🚀 High-performance GPU detected! Optimizing: BATCH_SIZE={BATCH_SIZE}, NUM_WORKERS={NUM_WORKERS}")
+        elif gpu_memory_gb >= 20:  # RTX 6000, A10, etc.
+            BATCH_SIZE = 64
+            NUM_WORKERS = min(16, os.cpu_count())
+            print(f"🔧 Mid-range GPU detected. Optimizing: BATCH_SIZE={BATCH_SIZE}, NUM_WORKERS={NUM_WORKERS}")
+        
+        # Scale learning rate with batch size (linear scaling rule)
+        if BATCH_SIZE != original_batch_size:
+            lr_scale_factor = BATCH_SIZE / original_batch_size
+            INITIAL_LR = INITIAL_LR * lr_scale_factor
+            print(f"📈 Scaling learning rate: {INITIAL_LR/lr_scale_factor:.2e} → {INITIAL_LR:.2e} (×{lr_scale_factor:.1f})")
     else:
         print("⚠️  GPU not detected. Possible issues:")
         print("   - CUDA drivers not installed")
