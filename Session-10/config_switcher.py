@@ -31,7 +31,7 @@ CONFIGS = {
         'DATASET_PATH': '"/data/imagenet/full_dataset"',  # Use dedicated /data mount (280GB available)
         'NUM_CLASSES': '1000',
         'IMAGE_SIZE': '224',
-        'BATCH_SIZE': '96',   # Optimized for T4 GPU (16GB VRAM) on g4dn.xlarge
+        'BATCH_SIZE': '128',  # Optimized for T4 GPU (16GB VRAM) on g4dn.xlarge
         'NUM_WORKERS': '4',   # Matched to 4 vCPUs on g4dn.xlarge
         'MAX_EPOCHS': '100',
         'EARLY_STOP_PATIENCE': '15',
