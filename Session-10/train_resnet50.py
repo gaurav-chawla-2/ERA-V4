@@ -190,7 +190,7 @@ BATCH_SIZE = 128    # Optimized for A100 40GB - can increase to 256 on H100 80GB
 NUM_WORKERS = 24    # Optimized for high-end instances (26-30 vCPUs available)
 
 # Training Configuration
-MAX_EPOCHS = 30           # Reduced epochs - ResNet50 converges by epoch 25-30
+MAX_EPOCHS = 25           # Optimized for OneCycleLR - faster convergence than cosine annealing
 EARLY_STOP_PATIENCE = 8   # Reduced patience for faster convergence detection
 MIN_EPOCHS_FOR_FEEDBACK = 5  # Earlier feedback for faster iteration
 TARGET_ACCURACY = 75.0   # Target accuracy percentage (realistic for full ImageNet)
@@ -214,7 +214,18 @@ PLOT_FREQUENCY = 5        # Generate plots every N epochs (set to 1 for every ep
 
 # Mixed Precision Training Configuration
 USE_MIXED_PRECISION = True        # Enable automatic mixed precision for faster training
-USE_COSINE_ANNEALING = True       # Use cosine annealing scheduler for better convergence
+
+# Learning Rate Scheduler Configuration
+USE_ONECYCLE_LR = True           # Use OneCycleLR for faster convergence (recommended for budget training)
+USE_COSINE_ANNEALING = False     # Use cosine annealing scheduler (alternative to OneCycleLR)
+
+# OneCycleLR Configuration (optimal for A100 + ImageNet)
+ONECYCLE_MAX_LR = 0.4            # Maximum LR for OneCycleLR (4x base LR for better performance)
+ONECYCLE_PCT_START = 0.3         # Percentage of cycle spent increasing LR (30% warmup)
+ONECYCLE_DIV_FACTOR = 25.0       # Initial LR = max_lr / div_factor
+ONECYCLE_FINAL_DIV_FACTOR = 1e4  # Final LR = initial_lr / final_div_factor
+
+# Cosine Annealing Configuration (if USE_COSINE_ANNEALING = True)
 COSINE_T_MAX = 30                 # T_max for cosine annealing (matches MAX_EPOCHS)
 COSINE_ETA_MIN = 1e-6             # Minimum learning rate for cosine annealing
 
@@ -809,6 +820,45 @@ def find_optimal_lr(learning_rates: List[float], losses: List[float]) -> float:
     return optimal_lr
 
 
+def compute_onecycle_max_lr(optimal_lr: float, batch_size: int = BATCH_SIZE) -> float:
+    """
+    Compute optimal max LR for OneCycleLR based on LR finder results
+    
+    Args:
+        optimal_lr: Optimal LR from LR finder
+        batch_size: Current batch size
+    
+    Returns:
+        Optimal max LR for OneCycleLR
+    """
+    # OneCycleLR typically uses 3-10x the optimal LR as max_lr
+    # For ImageNet + ResNet50, 5-8x works well
+    # Adjust based on batch size (larger batch = higher multiplier)
+    
+    if batch_size >= 256:
+        multiplier = 8.0  # High-end GPUs with large batches
+    elif batch_size >= 128:
+        multiplier = 6.0  # A100 40GB optimal
+    elif batch_size >= 64:
+        multiplier = 5.0  # Mid-range GPUs
+    else:
+        multiplier = 4.0  # Smaller batches
+    
+    max_lr = optimal_lr * multiplier
+    
+    # Safety bounds for ImageNet training
+    max_lr = min(max_lr, 0.3)  # Never exceed 0.6 (safe upper limit for ImageNet)
+    max_lr = max(max_lr, 0.01)  # Never below 0.05 (minimum effective LR)
+    
+    print(f"🔍 OneCycle Max LR Computation:")
+    print(f"   Optimal LR from finder: {optimal_lr:.2e}")
+    print(f"   Batch size: {batch_size}")
+    print(f"   Multiplier: {multiplier}x")
+    print(f"   Computed Max LR: {max_lr:.2e}")
+    
+    return max_lr
+
+
 def plot_lr_finder(learning_rates: List[float], losses: List[float], optimal_lr: float):
     """Plot LR finder results"""
     plt.figure(figsize=(10, 6))
@@ -834,7 +884,7 @@ def plot_lr_finder(learning_rates: List[float], losses: List[float], optimal_lr:
 
 def train_epoch(model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, 
                 criterion: nn.Module, device: torch.device, epoch: int, 
-                scaler: GradScaler = None) -> Tuple[float, float, float, float]:
+                scheduler=None, scaler: GradScaler = None) -> Tuple[float, float, float, float]:
     """Train for one epoch with mixed precision support"""
     
     epoch_start_time = time.time()  # Start timing the epoch
@@ -870,6 +920,10 @@ def train_epoch(model: nn.Module, train_loader: DataLoader, optimizer: optim.Opt
             loss = criterion(output, target)
             loss.backward()
             optimizer.step()
+        
+        # Step scheduler if OneCycleLR (needs per-batch updates)
+        if scheduler is not None and USE_ONECYCLE_LR:
+            scheduler.step()
         
         # Calculate Top-1 and Top-5 accuracy
         _, pred_top5 = output.topk(5, 1, True, True)
@@ -1473,6 +1527,7 @@ def main():
     parser.add_argument('--resume', action='store_true', help='Resume from checkpoint if available')
     parser.add_argument('--lr-finder-only', action='store_true', help='Only run LR finder and exit')
     parser.add_argument('--stats-only', action='store_true', help='Only compute stats and exit')
+    parser.add_argument('--compute-onecycle-lr', action='store_true', help='Automatically compute optimal OneCycle max LR before training')
     args = parser.parse_args()
     
     # Setup logging first
@@ -1600,11 +1655,23 @@ def main():
     optimizer = create_optimizer(model.parameters(), OPTIMIZER_TYPE, INITIAL_LR, MOMENTUM, WEIGHT_DECAY)
     
     # Run LR finder if requested
-    if args.lr_finder or args.lr_finder_only:
+    computed_max_lr = None
+    if args.lr_finder or args.lr_finder_only or args.compute_onecycle_lr:
         print("\n" + "="*60)
         learning_rates, losses, optimal_lr = lr_range_test(
             model, train_loader, criterion, device, num_iter=50, scaler=scaler
         )
+        
+        # Compute optimal OneCycle max LR if using OneCycleLR
+        if USE_ONECYCLE_LR:
+            computed_max_lr = compute_onecycle_max_lr(optimal_lr, BATCH_SIZE)
+            print(f"\n📈 OneCycle LR Configuration:")
+            print(f"   Current Max LR: {ONECYCLE_MAX_LR:.2e}")
+            print(f"   Computed Max LR: {computed_max_lr:.2e}")
+            if abs(computed_max_lr - ONECYCLE_MAX_LR) / ONECYCLE_MAX_LR > 0.2:
+                print(f"   ⚠️  Recommendation: Update ONECYCLE_MAX_LR to {computed_max_lr:.2e}")
+            else:
+                print(f"   ✅ Current Max LR is optimal")
         
         # Save LR finder results
         lr_results_file = os.path.join(SAVE_DIR, 'lr_finder_results.txt')
@@ -1613,17 +1680,53 @@ def main():
             f.write(f"Suggested Optimal LR: {optimal_lr:.2e}\n")
             f.write(f"Current LR in config: {INITIAL_LR:.2e}\n")
             f.write(f"Recommendation: {'✅ Current LR is good' if abs(optimal_lr - INITIAL_LR) / INITIAL_LR < 0.5 else '⚠️ Consider updating LR'}\n")
+            if USE_ONECYCLE_LR and computed_max_lr:
+                f.write(f"\nOneCycle LR Configuration:\n")
+                f.write(f"Current OneCycle Max LR: {ONECYCLE_MAX_LR:.2e}\n")
+                f.write(f"Computed OneCycle Max LR: {computed_max_lr:.2e}\n")
+                f.write(f"OneCycle Recommendation: {'✅ Current Max LR is optimal' if abs(computed_max_lr - ONECYCLE_MAX_LR) / ONECYCLE_MAX_LR <= 0.2 else f'⚠️ Update ONECYCLE_MAX_LR to {computed_max_lr:.2e}'}\n")
         print(f"📊 LR finder results saved to: {lr_results_file}")
         
         if args.lr_finder_only:
             print("✅ LR finder completed!")
             return
+        elif args.compute_onecycle_lr:
+            print("✅ OneCycle max LR computed! Proceeding with training...")
     
-    # Warmup + cosine annealing for faster convergence with higher LR
-    warmup_epochs = 2
-    main_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS-warmup_epochs, eta_min=INITIAL_LR/100)
-    warmup_scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=warmup_epochs)
-    scheduler = optim.lr_scheduler.SequentialLR(optimizer, [warmup_scheduler, main_scheduler], milestones=[warmup_epochs])
+    # Setup learning rate scheduler based on configuration
+    if USE_ONECYCLE_LR:
+        # OneCycleLR for faster convergence and better performance
+        steps_per_epoch = len(train_loader)
+        total_steps = MAX_EPOCHS * steps_per_epoch
+        
+        # Use computed max LR if available, otherwise use config value
+        max_lr_to_use = computed_max_lr if computed_max_lr is not None else ONECYCLE_MAX_LR
+        
+        scheduler = optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=max_lr_to_use,
+            total_steps=total_steps,
+            pct_start=ONECYCLE_PCT_START,
+            div_factor=ONECYCLE_DIV_FACTOR,
+            final_div_factor=ONECYCLE_FINAL_DIV_FACTOR,
+            anneal_strategy='cos'
+        )
+        
+        if computed_max_lr is not None:
+            print(f"📈 Using OneCycleLR with computed max_lr: {max_lr_to_use:.2e}, total_steps={total_steps}")
+        else:
+            print(f"📈 Using OneCycleLR with config max_lr: {max_lr_to_use:.2e}, total_steps={total_steps}")
+    elif USE_COSINE_ANNEALING:
+        # Warmup + cosine annealing for stable convergence
+        warmup_epochs = 3
+        main_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS-warmup_epochs, eta_min=COSINE_ETA_MIN)
+        warmup_scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=warmup_epochs)
+        scheduler = optim.lr_scheduler.SequentialLR(optimizer, [warmup_scheduler, main_scheduler], milestones=[warmup_epochs])
+        print(f"📈 Using Cosine Annealing: T_max={COSINE_T_MAX}, eta_min={COSINE_ETA_MIN}")
+    else:
+        # Fallback to StepLR
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+        print(f"📈 Using StepLR: step_size=10, gamma=0.1")
     
     # Check for checkpoint to resume from
     start_epoch = 1
@@ -1672,13 +1775,14 @@ def main():
         print("-" * 50)
         
         # Training
-        train_loss, train_acc, train_top5, train_time = train_epoch(model, train_loader, optimizer, criterion, device, epoch, scaler)
+        train_loss, train_acc, train_top5, train_time = train_epoch(model, train_loader, optimizer, criterion, device, epoch, scheduler, scaler)
         
         # Validation
         val_loss, val_acc, val_top5, val_time = validate_epoch(model, val_loader, criterion, device)
         
-        # Update scheduler
-        scheduler.step()
+        # Update scheduler (only for non-OneCycleLR schedulers, as OneCycleLR steps per batch)
+        if not USE_ONECYCLE_LR:
+            scheduler.step()
         current_lr = optimizer.param_groups[0]['lr']
         
         # Record metrics
