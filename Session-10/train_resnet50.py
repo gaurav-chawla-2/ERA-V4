@@ -135,7 +135,7 @@ class HuggingFaceImageNetDataset(Dataset):
         return image, label
 NUM_CLASSES = 1000  # ImageNet has 1000 classes (change to 200 for Tiny-ImageNet)
 IMAGE_SIZE = 224    # ImageNet uses 224x224 images (change to 64 for Tiny-ImageNet)
-BATCH_SIZE = 128    # Optimized for g4dn.xlarge NVIDIA T4 GPU (16GB VRAM)
+BATCH_SIZE = 64     # Optimized for g4dn.xlarge NVIDIA T4 GPU (14.56GB available)
 NUM_WORKERS = 4     # Optimized for g4dn.xlarge (4 vCPUs)
 
 # Training Configuration
