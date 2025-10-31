@@ -38,6 +38,57 @@ except ImportError:
     HF_DATASETS_AVAILABLE = False
 warnings.filterwarnings('ignore')
 
+# Configuration integration functions
+def load_stored_stats():
+    """Load stored dataset statistics if available."""
+    try:
+        from config_switcher import ConfigManager
+        config_manager = ConfigManager()
+        stats = config_manager.load_stored_stats()
+        if stats:
+            mean = torch.tensor(stats['mean'])
+            std = torch.tensor(stats['std'])
+            print(f"✓ Loaded stored dataset statistics:")
+            print(f"  Mean: {mean.tolist()}")
+            print(f"  Std: {std.tolist()}")
+            return mean, std
+    except Exception as e:
+        print(f"Note: Could not load stored statistics: {e}")
+    return None, None
+
+def load_stored_lr():
+    """Load stored optimal learning rate if available."""
+    try:
+        from config_switcher import ConfigManager
+        config_manager = ConfigManager()
+        lr = config_manager.load_stored_lr()
+        if lr:
+            print(f"✓ Loaded stored optimal learning rate: {lr}")
+            return lr
+    except Exception as e:
+        print(f"Note: Could not load stored learning rate: {e}")
+    return None
+
+def store_computed_stats(mean, std):
+    """Store computed dataset statistics."""
+    try:
+        from config_switcher import ConfigManager
+        config_manager = ConfigManager()
+        config_manager.store_stats(mean.tolist(), std.tolist())
+        print(f"✓ Stored dataset statistics for future use")
+    except Exception as e:
+        print(f"Warning: Could not store statistics: {e}")
+
+def store_optimal_lr(lr):
+    """Store optimal learning rate."""
+    try:
+        from config_switcher import ConfigManager
+        config_manager = ConfigManager()
+        config_manager.store_lr(lr)
+        print(f"✓ Stored optimal learning rate: {lr}")
+    except Exception as e:
+        print(f"Warning: Could not store learning rate: {e}")
+
 # ============================================================================
 # CONFIGURATION PARAMETERS - Modify these for different experiments
 # ============================================================================# Configuration Parameters
@@ -151,7 +202,7 @@ LABEL_SMOOTHING = 0.1     # Label smoothing for better generalization
 
 # Optimizer Configuration
 OPTIMIZER_TYPE = 'SGD'    # SGD often works better for full ImageNet
-INITIAL_LR = 0.1          # Standard learning rate for ImageNet training
+INITIAL_LR = 1.20e-05     # Optimal learning rate found by LR range test
 MOMENTUM = 0.9            # Momentum for SGD optimizer
 WEIGHT_DECAY = 1e-3       # Standard weight decay for ImageNet
 
@@ -608,12 +659,15 @@ def compute_dataset_stats(data_loader: DataLoader, device: torch.device, num_sam
     print(f"   Std:  [{std[0]:.4f}, {std[1]:.4f}, {std[2]:.4f}]")
     print(f"   Computed from {total_samples} samples")
     
+    # Automatically store the computed statistics
+    store_computed_stats(mean, std)
+    
     return mean, std
 
 
 def lr_range_test(model: nn.Module, train_loader: DataLoader, criterion: nn.Module, 
                   device: torch.device, start_lr: float = 1e-7, end_lr: float = 10, 
-                  num_iter: int = 100, scaler: GradScaler = None) -> Tuple[List[float], List[float]]:
+                  num_iter: int = 100, scaler: GradScaler = None) -> Tuple[List[float], List[float], float]:
     """
     Perform learning rate range test to find optimal learning rate
     
@@ -744,7 +798,12 @@ def find_optimal_lr(learning_rates: List[float], losses: List[float]) -> float:
     # Use a point slightly before the steepest descent for safety
     optimal_idx = max(0, min_gradient_idx - len(losses) // 10)
     
-    return learning_rates[optimal_idx]
+    optimal_lr = learning_rates[optimal_idx]
+    
+    # Automatically store the optimal learning rate
+    store_optimal_lr(optimal_lr)
+    
+    return optimal_lr
 
 
 def plot_lr_finder(learning_rates: List[float], losses: List[float], optimal_lr: float):
@@ -772,8 +831,10 @@ def plot_lr_finder(learning_rates: List[float], losses: List[float], optimal_lr:
 
 def train_epoch(model: nn.Module, train_loader: DataLoader, optimizer: optim.Optimizer, 
                 criterion: nn.Module, device: torch.device, epoch: int, 
-                scaler: GradScaler = None) -> Tuple[float, float, float]:
+                scaler: GradScaler = None) -> Tuple[float, float, float, float]:
     """Train for one epoch with mixed precision support"""
+    
+    epoch_start_time = time.time()  # Start timing the epoch
     
     model.train()
     running_loss = 0.0
@@ -836,17 +897,20 @@ def train_epoch(model: nn.Module, train_loader: DataLoader, optimizer: optim.Opt
     epoch_top1_acc = 100. * correct_top1 / total
     epoch_top5_acc = 100. * correct_top5 / total
     
-    # Log epoch summary
+    # Calculate epoch time
+    epoch_time = time.time() - epoch_start_time
+    
+    # Log epoch summary with timing
     precision_str = "FP16" if USE_MIXED_PRECISION else "FP32"
-    logging.info(f"Train Epoch {epoch}: Loss={epoch_loss:.4f}, Top-1 Acc={epoch_top1_acc:.2f}%, Top-5 Acc={epoch_top5_acc:.2f}% ({precision_str})")
+    logging.info(f"Train Epoch {epoch}: Loss={epoch_loss:.4f}, Top-1 Acc={epoch_top1_acc:.2f}%, Top-5 Acc={epoch_top5_acc:.2f}% ({precision_str}) - Time: {epoch_time:.2f}s")
     
-    return epoch_loss, epoch_top1_acc, epoch_top5_acc
-    
-    return epoch_loss, epoch_acc
+    return epoch_loss, epoch_top1_acc, epoch_top5_acc, epoch_time
 
 def validate_epoch(model: nn.Module, val_loader: DataLoader, criterion: nn.Module, 
-                  device: torch.device) -> Tuple[float, float, float]:
+                  device: torch.device) -> Tuple[float, float, float, float]:
     """Validate for one epoch with mixed precision support"""
+    
+    epoch_start_time = time.time()  # Start timing the validation epoch
     
     model.eval()
     running_loss = 0.0
@@ -886,11 +950,14 @@ def validate_epoch(model: nn.Module, val_loader: DataLoader, criterion: nn.Modul
     epoch_top1_acc = 100. * correct_top1 / total
     epoch_top5_acc = 100. * correct_top5 / total
     
-    # Log validation summary
-    precision_str = "FP16" if USE_MIXED_PRECISION else "FP32"
-    logging.info(f"Validation: Loss={epoch_loss:.4f}, Top-1 Acc={epoch_top1_acc:.2f}%, Top-5 Acc={epoch_top5_acc:.2f}% ({precision_str})")
+    # Calculate validation time
+    epoch_time = time.time() - epoch_start_time
     
-    return epoch_loss, epoch_top1_acc, epoch_top5_acc
+    # Log validation summary with timing
+    precision_str = "FP16" if USE_MIXED_PRECISION else "FP32"
+    logging.info(f"Validation: Loss={epoch_loss:.4f}, Top-1 Acc={epoch_top1_acc:.2f}%, Top-5 Acc={epoch_top5_acc:.2f}% ({precision_str}) - Time: {epoch_time:.2f}s")
+    
+    return epoch_loss, epoch_top1_acc, epoch_top5_acc, epoch_time
 
 # ============================================================================
 # VISUALIZATION AND LOGGING FUNCTIONS
@@ -1442,10 +1509,18 @@ def main():
     train_loader, val_loader, actual_num_classes = create_data_loaders()
     
     # Update global NUM_CLASSES if different
-    global NUM_CLASSES
+    global NUM_CLASSES, INITIAL_LR
     if NUM_CLASSES != actual_num_classes:
         print(f"⚠️  Updating NUM_CLASSES from {NUM_CLASSES} to {actual_num_classes}")
         NUM_CLASSES = actual_num_classes
+    
+    # Automatically load stored learning rate if available (unless manual override)
+    if not (args.lr_finder or args.lr_finder_only):
+        stored_lr = load_stored_lr()
+        if stored_lr and not args.compute_stats and not args.stats_only:
+            print(f"\n🔄 Using stored optimal learning rate: {stored_lr:.2e}")
+            print(f"   Previous LR in config: {INITIAL_LR:.2e}")
+            INITIAL_LR = stored_lr
     
     # Compute dataset statistics if requested
     if args.compute_stats or args.stats_only:
@@ -1569,10 +1644,10 @@ def main():
         print("-" * 50)
         
         # Training
-        train_loss, train_acc, train_top5 = train_epoch(model, train_loader, optimizer, criterion, device, epoch, scaler)
+        train_loss, train_acc, train_top5, train_time = train_epoch(model, train_loader, optimizer, criterion, device, epoch, scaler)
         
         # Validation
-        val_loss, val_acc, val_top5 = validate_epoch(model, val_loader, criterion, device)
+        val_loss, val_acc, val_top5, val_time = validate_epoch(model, val_loader, criterion, device)
         
         # Update scheduler
         scheduler.step()
@@ -1585,9 +1660,13 @@ def main():
         val_accs.append(val_acc)
         learning_rates.append(current_lr)
         
-        # Print epoch results
-        print(f"📊 Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
-        print(f"📊 Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}%")
+        # Calculate total epoch time
+        total_epoch_time = train_time + val_time
+        
+        # Print epoch results with timing
+        print(f"📊 Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}% | Time: {train_time:.2f}s")
+        print(f"📊 Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}% | Time: {val_time:.2f}s")
+        print(f"⏱️  Total Epoch Time: {total_epoch_time:.2f}s")
         print(f"📊 Learning Rate: {current_lr:.2e}")
         
         # Check for best model
