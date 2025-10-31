@@ -61,10 +61,11 @@ INITIAL_LR = 0.1          # Standard learning rate for ImageNet training
 MOMENTUM = 0.9            # Momentum for SGD optimizer
 WEIGHT_DECAY = 1e-3       # Standard weight decay for ImageNet
 
-# Logging and Visualization Configuration
+# Visualization and Logging
 SAVE_DIR = "./results"    # Directory to save results
 LOG_INTERVAL = 10         # Log every N batches
 PLOT_STYLE = 'seaborn-v0_8'  # Matplotlib style
+PLOT_FREQUENCY = 5        # Generate plots every N epochs (set to 1 for every epoch)
 
 # Mixed Precision Training Configuration (optimized for T4 GPU)
 USE_MIXED_PRECISION = True        # Enable automatic mixed precision for faster training
@@ -805,6 +806,175 @@ def plot_training_progress(train_losses: List[float], train_accs: List[float],
     plt.tight_layout()
     plt.savefig(os.path.join(SAVE_DIR, 'training_progress.png'), dpi=300, bbox_inches='tight')
     plt.close()
+    
+    # Generate individual plots for better analysis
+    generate_individual_plots(train_losses, train_accs, val_losses, val_accs, learning_rates)
+
+
+def generate_individual_plots(train_losses: List[float], train_accs: List[float], 
+                            val_losses: List[float], val_accs: List[float], 
+                            learning_rates: List[float]):
+    """Generate individual plots for detailed analysis"""
+    
+    epochs = range(1, len(train_losses) + 1)
+    
+    # 1. Loss Plot (Individual)
+    plt.figure(figsize=(12, 8))
+    plt.plot(epochs, train_losses, 'b-', label='Training Loss', linewidth=2, marker='o', markersize=4)
+    plt.plot(epochs, val_losses, 'r-', label='Validation Loss', linewidth=2, marker='s', markersize=4)
+    plt.xlabel('Epoch', fontsize=12)
+    plt.ylabel('Loss', fontsize=12)
+    plt.title('Training and Validation Loss Over Time', fontsize=14, fontweight='bold')
+    plt.legend(fontsize=11)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(SAVE_DIR, 'loss_curves.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 2. Accuracy Plot (Individual)
+    plt.figure(figsize=(12, 8))
+    plt.plot(epochs, train_accs, 'b-', label='Training Accuracy', linewidth=2, marker='o', markersize=4)
+    plt.plot(epochs, val_accs, 'r-', label='Validation Accuracy', linewidth=2, marker='s', markersize=4)
+    plt.axhline(y=TARGET_ACCURACY, color='g', linestyle='--', linewidth=2,
+                label=f'Target: {TARGET_ACCURACY}%')
+    plt.xlabel('Epoch', fontsize=12)
+    plt.ylabel('Accuracy (%)', fontsize=12)
+    plt.title('Training and Validation Accuracy Over Time', fontsize=14, fontweight='bold')
+    plt.legend(fontsize=11)
+    plt.grid(True, alpha=0.3)
+    plt.ylim(0, 100)
+    plt.tight_layout()
+    plt.savefig(os.path.join(SAVE_DIR, 'accuracy_curves.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 3. Learning Rate Schedule (Individual)
+    plt.figure(figsize=(12, 8))
+    plt.plot(epochs, learning_rates, 'g-', linewidth=2, marker='d', markersize=4)
+    plt.xlabel('Epoch', fontsize=12)
+    plt.ylabel('Learning Rate', fontsize=12)
+    plt.title('Learning Rate Schedule', fontsize=14, fontweight='bold')
+    plt.yscale('log')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(SAVE_DIR, 'learning_rate_schedule.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 4. Overfitting Analysis (Individual)
+    plt.figure(figsize=(12, 8))
+    overfitting_gap = [train_acc - val_acc for train_acc, val_acc in zip(train_accs, val_accs)]
+    plt.plot(epochs, overfitting_gap, 'purple', linewidth=2, marker='^', markersize=4)
+    plt.axhline(y=0, color='black', linestyle='-', alpha=0.5, linewidth=1)
+    plt.axhline(y=5, color='orange', linestyle='--', alpha=0.7, linewidth=1, label='Warning Threshold (5%)')
+    plt.axhline(y=10, color='red', linestyle='--', alpha=0.7, linewidth=1, label='High Overfitting (10%)')
+    plt.xlabel('Epoch', fontsize=12)
+    plt.ylabel('Accuracy Gap (Train - Validation) %', fontsize=12)
+    plt.title('Overfitting Analysis', fontsize=14, fontweight='bold')
+    plt.legend(fontsize=11)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(SAVE_DIR, 'overfitting_analysis.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 5. Combined Loss and Accuracy (Side by side)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Loss subplot
+    ax1.plot(epochs, train_losses, 'b-', label='Training Loss', linewidth=2, marker='o', markersize=3)
+    ax1.plot(epochs, val_losses, 'r-', label='Validation Loss', linewidth=2, marker='s', markersize=3)
+    ax1.set_xlabel('Epoch', fontsize=12)
+    ax1.set_ylabel('Loss', fontsize=12)
+    ax1.set_title('Loss Curves', fontsize=14, fontweight='bold')
+    ax1.legend(fontsize=11)
+    ax1.grid(True, alpha=0.3)
+    
+    # Accuracy subplot
+    ax2.plot(epochs, train_accs, 'b-', label='Training Accuracy', linewidth=2, marker='o', markersize=3)
+    ax2.plot(epochs, val_accs, 'r-', label='Validation Accuracy', linewidth=2, marker='s', markersize=3)
+    ax2.axhline(y=TARGET_ACCURACY, color='g', linestyle='--', linewidth=2,
+                label=f'Target: {TARGET_ACCURACY}%')
+    ax2.set_xlabel('Epoch', fontsize=12)
+    ax2.set_ylabel('Accuracy (%)', fontsize=12)
+    ax2.set_title('Accuracy Curves', fontsize=14, fontweight='bold')
+    ax2.legend(fontsize=11)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim(0, 100)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(SAVE_DIR, 'loss_and_accuracy.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # 6. Training Metrics Summary
+    plt.figure(figsize=(14, 10))
+    
+    # Create a 2x2 subplot for summary
+    gs = plt.GridSpec(2, 2, hspace=0.3, wspace=0.3)
+    
+    # Loss plot
+    ax1 = plt.subplot(gs[0, 0])
+    ax1.plot(epochs, train_losses, 'b-', label='Training', linewidth=2)
+    ax1.plot(epochs, val_losses, 'r-', label='Validation', linewidth=2)
+    ax1.set_title('Loss', fontweight='bold')
+    ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('Loss')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # Accuracy plot
+    ax2 = plt.subplot(gs[0, 1])
+    ax2.plot(epochs, train_accs, 'b-', label='Training', linewidth=2)
+    ax2.plot(epochs, val_accs, 'r-', label='Validation', linewidth=2)
+    ax2.axhline(y=TARGET_ACCURACY, color='g', linestyle='--', label=f'Target: {TARGET_ACCURACY}%')
+    ax2.set_title('Accuracy', fontweight='bold')
+    ax2.set_xlabel('Epoch')
+    ax2.set_ylabel('Accuracy (%)')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim(0, 100)
+    
+    # Learning rate plot
+    ax3 = plt.subplot(gs[1, 0])
+    ax3.plot(epochs, learning_rates, 'g-', linewidth=2)
+    ax3.set_title('Learning Rate', fontweight='bold')
+    ax3.set_xlabel('Epoch')
+    ax3.set_ylabel('Learning Rate')
+    ax3.set_yscale('log')
+    ax3.grid(True, alpha=0.3)
+    
+    # Performance metrics
+    ax4 = plt.subplot(gs[1, 1])
+    if len(val_accs) > 0:
+        best_val_acc = max(val_accs)
+        best_epoch = val_accs.index(best_val_acc) + 1
+        final_val_acc = val_accs[-1]
+        final_train_acc = train_accs[-1]
+        
+        metrics = ['Best Val Acc', 'Final Val Acc', 'Final Train Acc']
+        values = [best_val_acc, final_val_acc, final_train_acc]
+        colors = ['green', 'blue', 'orange']
+        
+        bars = ax4.bar(metrics, values, color=colors, alpha=0.7)
+        ax4.set_title('Performance Summary', fontweight='bold')
+        ax4.set_ylabel('Accuracy (%)')
+        ax4.set_ylim(0, 100)
+        
+        # Add value labels on bars
+        for bar, value in zip(bars, values):
+            height = bar.get_height()
+            ax4.text(bar.get_x() + bar.get_width()/2., height + 1,
+                    f'{value:.1f}%', ha='center', va='bottom', fontweight='bold')
+    
+    plt.suptitle('Training Metrics Summary', fontsize=16, fontweight='bold')
+    plt.savefig(os.path.join(SAVE_DIR, 'training_summary.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print("📊 Generated comprehensive training visualizations:")
+    print(f"   - {SAVE_DIR}/training_progress.png (4-panel overview)")
+    print(f"   - {SAVE_DIR}/loss_curves.png (detailed loss analysis)")
+    print(f"   - {SAVE_DIR}/accuracy_curves.png (detailed accuracy analysis)")
+    print(f"   - {SAVE_DIR}/learning_rate_schedule.png (LR schedule)")
+    print(f"   - {SAVE_DIR}/overfitting_analysis.png (overfitting analysis)")
+    print(f"   - {SAVE_DIR}/loss_and_accuracy.png (side-by-side comparison)")
+    print(f"   - {SAVE_DIR}/training_summary.png (performance summary)")
 
 def save_training_results(train_losses: List[float], train_accs: List[float], 
                          val_losses: List[float], val_accs: List[float], 
@@ -1218,10 +1388,10 @@ def main():
         print("-" * 50)
         
         # Training
-        train_loss, train_top1, train_top5 = train_epoch(model, train_loader, optimizer, criterion, device, epoch, scaler)
+        train_loss, train_acc, train_top5 = train_epoch(model, train_loader, optimizer, criterion, device, epoch, scaler)
         
         # Validation
-        val_loss, val_top1, val_top5 = validate_epoch(model, val_loader, criterion, device)
+        val_loss, val_acc, val_top5 = validate_epoch(model, val_loader, criterion, device)
         
         # Update scheduler
         scheduler.step()
@@ -1248,6 +1418,11 @@ def main():
             print(f"✅ New best validation accuracy: {best_val_acc:.2f}%")
         else:
             patience_counter += 1
+        
+        # Generate plots periodically (based on PLOT_FREQUENCY) and when we get a new best model
+        if epoch % PLOT_FREQUENCY == 0 or is_best or epoch == 1:
+            print("📊 Generating training progress plots...")
+            plot_training_progress(train_losses, train_accs, val_losses, val_accs, learning_rates)
         
         # Save checkpoint
         if epoch % SAVE_CHECKPOINT_EVERY == 0 or is_best:
