@@ -135,7 +135,7 @@ class HuggingFaceImageNetDataset(Dataset):
         return image, label
 NUM_CLASSES = 1000  # ImageNet has 1000 classes (change to 200 for Tiny-ImageNet)
 IMAGE_SIZE = 224    # ImageNet uses 224x224 images (change to 64 for Tiny-ImageNet)
-BATCH_SIZE = 64     # Optimized for g4dn.xlarge NVIDIA T4 GPU (14.56GB available)
+BATCH_SIZE = 32     # Conservative for g4dn.xlarge NVIDIA T4 GPU memory constraints
 NUM_WORKERS = 4     # Optimized for g4dn.xlarge (4 vCPUs)
 
 # Training Configuration
@@ -682,6 +682,10 @@ def lr_range_test(model: nn.Module, train_loader: DataLoader, criterion: nn.Modu
         # Record loss
         loss_value = loss.item()
         losses.append(loss_value)
+        
+        # Clear GPU cache to prevent memory accumulation
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
         
         # Stop if loss explodes
         if loss_value > best_loss * 4:
