@@ -197,7 +197,7 @@ class HuggingFaceImageNetDataset(Dataset):
         return image, label
 NUM_CLASSES = 1000  # ImageNet has 1000 classes
 IMAGE_SIZE = 224    # ImageNet uses 224x224 images
-BATCH_SIZE = 128    # Optimized for A100 40GB - can increase to 256 on H100 80GB
+BATCH_SIZE = 32     # Conservative for A100 40GB to avoid OOM - can increase after optimization
 NUM_WORKERS = 24    # Optimized for high-end instances (26-30 vCPUs available)
 
 # Training Configuration
@@ -1630,9 +1630,9 @@ def main():
             NUM_WORKERS = min(32, os.cpu_count())
             print(f"🚀 High-end GPU detected! Optimizing: BATCH_SIZE={BATCH_SIZE}, NUM_WORKERS={NUM_WORKERS}")
         elif gpu_memory_gb >= 35:  # A100 40GB, H100 SXM variants
-            BATCH_SIZE = 128
-            NUM_WORKERS = min(24, os.cpu_count())
-            print(f"🚀 High-performance GPU detected! Optimizing: BATCH_SIZE={BATCH_SIZE}, NUM_WORKERS={NUM_WORKERS}")
+            BATCH_SIZE = 64  # Conservative setting to prevent OOM errors
+            NUM_WORKERS = min(16, os.cpu_count())
+            print(f"🚀 High-performance GPU detected! Using conservative settings: BATCH_SIZE={BATCH_SIZE}, NUM_WORKERS={NUM_WORKERS}")
         elif gpu_memory_gb >= 20:  # RTX 6000, A10, etc.
             BATCH_SIZE = 64
             NUM_WORKERS = min(16, os.cpu_count())
