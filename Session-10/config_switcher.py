@@ -40,7 +40,7 @@ CONFIGS = {
         'DROPOUT_RATE': '0.2',
         'LABEL_SMOOTHING': '0.1',
         'OPTIMIZER_TYPE': "'SGD'",
-        'INITIAL_LR': '0.1',
+        'INITIAL_LR': '0.01',
         'WEIGHT_DECAY': '1e-3',
         'USE_MIXED_PRECISION': 'True'  # Enable FP16 for T4 GPU optimization
     }

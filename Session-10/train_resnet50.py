@@ -433,10 +433,197 @@ def create_data_loaders() -> Tuple[DataLoader, DataLoader, int]:
     return train_loader, val_loader, num_classes
 
 # ============================================================================
-# LEARNING RATE FINDER FOR ATOM OPTIMIZER
+# DATASET STATISTICS AND LR FINDER
 # ============================================================================
 
-# LR finder function removed - using stable optimizers instead
+def compute_dataset_stats(data_loader: DataLoader, device: torch.device, num_samples: int = 1000) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Compute mean and std of the dataset for normalization
+    
+    Args:
+        data_loader: DataLoader for the dataset
+        device: Device to run computations on
+        num_samples: Number of samples to use for statistics (for efficiency)
+    
+    Returns:
+        Tuple of (mean, std) tensors
+    """
+    print("🔍 Computing dataset statistics...")
+    
+    mean = torch.zeros(3)
+    std = torch.zeros(3)
+    total_samples = 0
+    
+    with torch.no_grad():
+        for i, (data, _) in enumerate(data_loader):
+            if total_samples >= num_samples:
+                break
+                
+            batch_samples = data.size(0)
+            data = data.view(batch_samples, data.size(1), -1)
+            mean += data.mean(2).sum(0)
+            std += data.std(2).sum(0)
+            total_samples += batch_samples
+    
+    mean /= total_samples
+    std /= total_samples
+    
+    print(f"📊 Dataset Statistics:")
+    print(f"   Mean: [{mean[0]:.4f}, {mean[1]:.4f}, {mean[2]:.4f}]")
+    print(f"   Std:  [{std[0]:.4f}, {std[1]:.4f}, {std[2]:.4f}]")
+    print(f"   Computed from {total_samples} samples")
+    
+    return mean, std
+
+
+def lr_range_test(model: nn.Module, train_loader: DataLoader, criterion: nn.Module, 
+                  device: torch.device, start_lr: float = 1e-7, end_lr: float = 10, 
+                  num_iter: int = 100, scaler: GradScaler = None) -> Tuple[List[float], List[float]]:
+    """
+    Perform learning rate range test to find optimal learning rate
+    
+    Args:
+        model: The model to test
+        train_loader: Training data loader
+        criterion: Loss criterion
+        device: Device to run on
+        start_lr: Starting learning rate
+        end_lr: Ending learning rate
+        num_iter: Number of iterations to test
+        scaler: GradScaler for mixed precision
+    
+    Returns:
+        Tuple of (learning_rates, losses)
+    """
+    print("🔍 Performing Learning Rate Range Test...")
+    print(f"   Range: {start_lr:.2e} to {end_lr:.2e}")
+    print(f"   Iterations: {num_iter}")
+    
+    # Save original model state
+    original_state = model.state_dict().copy()
+    
+    # Setup optimizer for LR test
+    optimizer = optim.SGD(model.parameters(), lr=start_lr, momentum=0.9, weight_decay=1e-4)
+    
+    # Calculate multiplication factor
+    lr_mult = (end_lr / start_lr) ** (1 / num_iter)
+    
+    learning_rates = []
+    losses = []
+    best_loss = float('inf')
+    
+    model.train()
+    data_iter = iter(train_loader)
+    
+    for iteration in range(num_iter):
+        try:
+            data, target = next(data_iter)
+        except StopIteration:
+            data_iter = iter(train_loader)
+            data, target = next(data_iter)
+        
+        data, target = data.to(device), target.to(device)
+        
+        # Get current learning rate
+        current_lr = optimizer.param_groups[0]['lr']
+        learning_rates.append(current_lr)
+        
+        # Forward pass
+        optimizer.zero_grad()
+        
+        if scaler is not None:
+            with autocast():
+                output = model(data)
+                loss = criterion(output, target)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            output = model(data)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer.step()
+        
+        # Record loss
+        loss_value = loss.item()
+        losses.append(loss_value)
+        
+        # Stop if loss explodes
+        if loss_value > best_loss * 4:
+            print(f"   Stopping early at iteration {iteration} - loss exploded")
+            break
+        
+        if loss_value < best_loss:
+            best_loss = loss_value
+        
+        # Update learning rate
+        for param_group in optimizer.param_groups:
+            param_group['lr'] *= lr_mult
+        
+        # Progress update
+        if (iteration + 1) % (num_iter // 10) == 0:
+            print(f"   Progress: {iteration + 1}/{num_iter} - LR: {current_lr:.2e} - Loss: {loss_value:.4f}")
+    
+    # Restore original model state
+    model.load_state_dict(original_state)
+    
+    # Find optimal learning rate (steepest descent point)
+    optimal_lr = find_optimal_lr(learning_rates, losses)
+    
+    print(f"✅ LR Range Test Complete")
+    print(f"   Suggested optimal LR: {optimal_lr:.2e}")
+    
+    # Plot LR finder results
+    plot_lr_finder(learning_rates, losses, optimal_lr)
+    
+    return learning_rates, losses, optimal_lr
+
+
+def find_optimal_lr(learning_rates: List[float], losses: List[float]) -> float:
+    """
+    Find optimal learning rate from LR range test results
+    Uses the point of steepest descent in the loss curve
+    """
+    if len(losses) < 10:
+        return learning_rates[len(losses) // 2]
+    
+    # Smooth the losses
+    smoothed_losses = []
+    window = max(1, len(losses) // 20)
+    
+    for i in range(len(losses)):
+        start_idx = max(0, i - window)
+        end_idx = min(len(losses), i + window + 1)
+        smoothed_losses.append(np.mean(losses[start_idx:end_idx]))
+    
+    # Find the steepest descent
+    gradients = np.gradient(smoothed_losses)
+    min_gradient_idx = np.argmin(gradients)
+    
+    # Use a point slightly before the steepest descent for safety
+    optimal_idx = max(0, min_gradient_idx - len(losses) // 10)
+    
+    return learning_rates[optimal_idx]
+
+
+def plot_lr_finder(learning_rates: List[float], losses: List[float], optimal_lr: float):
+    """Plot LR finder results"""
+    plt.figure(figsize=(10, 6))
+    plt.semilogx(learning_rates, losses)
+    plt.axvline(x=optimal_lr, color='red', linestyle='--', label=f'Suggested LR: {optimal_lr:.2e}')
+    plt.xlabel('Learning Rate')
+    plt.ylabel('Loss')
+    plt.title('Learning Rate Range Test')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Save plot
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    plt.savefig(os.path.join(SAVE_DIR, 'lr_finder.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"📊 LR finder plot saved to: {SAVE_DIR}/lr_finder.png")
+
 
 # ============================================================================
 # TRAINING AND VALIDATION FUNCTIONS
@@ -872,6 +1059,16 @@ def find_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
 
 def main():
     """Main training function"""
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='ResNet50 Training with LR Finder and Dataset Stats')
+    parser.add_argument('--lr-finder', action='store_true', help='Run LR range test')
+    parser.add_argument('--compute-stats', action='store_true', help='Compute dataset statistics')
+    parser.add_argument('--resume', action='store_true', help='Resume from checkpoint if available')
+    parser.add_argument('--lr-finder-only', action='store_true', help='Only run LR finder and exit')
+    parser.add_argument('--stats-only', action='store_true', help='Only compute stats and exit')
+    args = parser.parse_args()
     
     # Setup logging first
     logger = setup_logging()
@@ -904,6 +1101,23 @@ def main():
         print(f"⚠️  Updating NUM_CLASSES from {NUM_CLASSES} to {actual_num_classes}")
         NUM_CLASSES = actual_num_classes
     
+    # Compute dataset statistics if requested
+    if args.compute_stats or args.stats_only:
+        print("\n" + "="*60)
+        mean, std = compute_dataset_stats(train_loader, device)
+        
+        # Save stats to file
+        stats_file = os.path.join(SAVE_DIR, 'dataset_stats.txt')
+        with open(stats_file, 'w') as f:
+            f.write(f"Dataset Statistics for {dataset_name}\n")
+            f.write(f"Mean: [{mean[0]:.6f}, {mean[1]:.6f}, {mean[2]:.6f}]\n")
+            f.write(f"Std:  [{std[0]:.6f}, {std[1]:.6f}, {std[2]:.6f}]\n")
+        print(f"📊 Dataset statistics saved to: {stats_file}")
+        
+        if args.stats_only:
+            print("✅ Dataset statistics computation completed!")
+            return
+    
     # Model setup
     print(f"\n🏗️  Building ResNet50 model...")
     model = ResNet50(num_classes=NUM_CLASSES, dropout_rate=DROPOUT_RATE).to(device)
@@ -931,6 +1145,26 @@ def main():
     criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
     optimizer = create_optimizer(model.parameters(), OPTIMIZER_TYPE, INITIAL_LR, MOMENTUM, WEIGHT_DECAY)
     
+    # Run LR finder if requested
+    if args.lr_finder or args.lr_finder_only:
+        print("\n" + "="*60)
+        learning_rates, losses, optimal_lr = lr_range_test(
+            model, train_loader, criterion, device, scaler=scaler
+        )
+        
+        # Save LR finder results
+        lr_results_file = os.path.join(SAVE_DIR, 'lr_finder_results.txt')
+        with open(lr_results_file, 'w') as f:
+            f.write(f"LR Finder Results for {dataset_name}\n")
+            f.write(f"Suggested Optimal LR: {optimal_lr:.2e}\n")
+            f.write(f"Current LR in config: {INITIAL_LR:.2e}\n")
+            f.write(f"Recommendation: {'✅ Current LR is good' if abs(optimal_lr - INITIAL_LR) / INITIAL_LR < 0.5 else '⚠️ Consider updating LR'}\n")
+        print(f"📊 LR finder results saved to: {lr_results_file}")
+        
+        if args.lr_finder_only:
+            print("✅ LR finder completed!")
+            return
+    
     # Warmup + cosine annealing for faster convergence with higher LR
     warmup_epochs = 2
     main_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS-warmup_epochs, eta_min=INITIAL_LR/100)
@@ -947,7 +1181,7 @@ def main():
     
     # Try to resume from checkpoint
     resume_path = RESUME_FROM_CHECKPOINT
-    if resume_path is None:
+    if resume_path is None and args.resume:
         resume_path = find_latest_checkpoint(CHECKPOINT_DIR)
     
     if resume_path and os.path.exists(resume_path):
@@ -967,6 +1201,10 @@ def main():
             print(f"⚠️  Failed to load checkpoint: {e}")
             print("🔄 Starting fresh training...")
             start_epoch = 1
+    elif find_latest_checkpoint(CHECKPOINT_DIR) and not args.resume:
+        print(f"📁 Checkpoint found at {find_latest_checkpoint(CHECKPOINT_DIR)}")
+        print("💡 Use --resume flag to continue from checkpoint")
+        print("🆕 Starting fresh training...")
     else:
         print("🆕 Starting fresh training...")
     
