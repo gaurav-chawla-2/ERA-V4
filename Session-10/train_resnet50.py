@@ -31,6 +31,9 @@ import warnings
 from PIL import Image
 import logging
 from datetime import datetime
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+import cv2
 try:
     from datasets import load_from_disk
     HF_DATASETS_AVAILABLE = True
@@ -181,7 +184,15 @@ class HuggingFaceImageNetDataset(Dataset):
         
         # Apply transforms
         if self.transform:
-            image = self.transform(image)
+            if USE_ALBUMENTATIONS and hasattr(self.transform, '__call__'):
+                # For Albumentations, convert PIL to numpy array
+                image_array = np.array(image)
+                # Apply Albumentations transform
+                transformed = self.transform(image=image_array)
+                image = transformed['image']
+            else:
+                # For torchvision transforms
+                image = self.transform(image)
         
         return image, label
 NUM_CLASSES = 1000  # ImageNet has 1000 classes (change to 200 for Tiny-ImageNet)
@@ -195,22 +206,29 @@ EARLY_STOP_PATIENCE = 8   # Reduced patience for faster convergence detection
 MIN_EPOCHS_FOR_FEEDBACK = 5  # Earlier feedback for faster iteration
 TARGET_ACCURACY = 75.0   # Target accuracy percentage (realistic for full ImageNet)
 VALIDATION_SPLIT = 0.2    # Validation split ratio
+WARMUP_EPOCHS = 2         # Number of warmup epochs for stable training start
 
 # Model Configuration
-DROPOUT_RATE = 0.1        # Reduced dropout - larger batch size provides regularization
+DROPOUT_RATE = 0.1        # Standard dropout rate
 LABEL_SMOOTHING = 0.1     # Label smoothing for better generalization
 
 # Optimizer Configuration
 OPTIMIZER_TYPE = 'SGD'    # SGD often works better for full ImageNet
 INITIAL_LR = 0.1          # Higher LR for larger batch size (linear scaling rule)
 MOMENTUM = 0.9            # Momentum for SGD optimizer
-WEIGHT_DECAY = 1e-4       # Reduced weight decay for larger batch size
+WEIGHT_DECAY = 1e-4       # Standard weight decay
+GRADIENT_CLIP_VALUE = 1.0 # Gradient clipping for training stability
+
+# Simplified Augmentation Configuration
+USE_ALBUMENTATIONS = True  # Use Albumentations for data augmentation
+USE_CUTMIX = False         # Disable CutMix to keep training simple
+USE_MIXUP = False          # Disable MixUp to keep training simple
 
 # Visualization and Logging
 SAVE_DIR = "./results"    # Directory to save results
 LOG_INTERVAL = 10         # Log every N batches
-PLOT_STYLE = 'seaborn-v0_8'  # Matplotlib style
-PLOT_FREQUENCY = 5        # Generate plots every N epochs (set to 1 for every epoch)
+PLOT_FREQUENCY = 5        # Generate plots every N epochs
+VALIDATION_FREQUENCY = 1  # Run validation every epoch
 
 # Mixed Precision Training Configuration
 USE_MIXED_PRECISION = True        # Enable automatic mixed precision for faster training
@@ -278,7 +296,15 @@ class TinyImageNetValidationDataset(Dataset):
         image = Image.open(img_path).convert('RGB')
         
         if self.transform:
-            image = self.transform(image)
+            if USE_ALBUMENTATIONS and hasattr(self.transform, '__call__'):
+                # For Albumentations, convert PIL to numpy array
+                image_array = np.array(image)
+                # Apply Albumentations transform
+                transformed = self.transform(image=image_array)
+                image = transformed['image']
+            else:
+                # For torchvision transforms
+                image = self.transform(image)
         
         return image, label
 
@@ -459,26 +485,61 @@ def create_optimizer(parameters, optimizer_type: str, lr: float, momentum: float
 # DATA LOADING AND PREPROCESSING
 # ============================================================================
 
-def get_data_transforms() -> Tuple[transforms.Compose, transforms.Compose]:
-    """Get training and validation data transforms"""
+def get_data_transforms() -> Tuple[A.Compose, A.Compose]:
+    """Get training and validation data transforms using Albumentations"""
     
-    # Training transforms with light augmentation (optimized for Tiny-ImageNet 64x64)
-    train_transform = transforms.Compose([
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomRotation(degrees=5),   # Further reduced for initial learning
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-    
-    # Validation transforms (no augmentation)
-    val_transform = transforms.Compose([
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+    if USE_ALBUMENTATIONS:
+        # Training transforms matching the specified configuration
+        train_transform = A.Compose([
+            # Resize to 256, then crop to 224
+            A.Resize(256, 256),
+            A.RandomCrop(224, 224),
+            
+            # Horizontal flip only (no vertical flip, no rotation)
+            A.HorizontalFlip(p=0.5),
+            
+            # Color jitter with exact specified values
+            A.ColorJitter(
+                brightness=0.2, 
+                contrast=0.2, 
+                saturation=0.2, 
+                hue=0.1, 
+                p=1.0
+            ),
+            
+            # Normalization with specified values
+            A.Normalize(mean=[0.482, 0.457, 0.407], std=[0.229, 0.225, 0.226]),
+            ToTensorV2(),
+        ])
+        
+        # Validation transforms (no augmentation)
+        val_transform = A.Compose([
+            A.Resize(256, 256),
+            A.CenterCrop(224, 224),
+            A.Normalize(mean=[0.482, 0.457, 0.407], std=[0.229, 0.225, 0.226]),
+            ToTensorV2(),
+        ])
+        
+    else:
+        # Fallback to torchvision transforms with matching configuration
+        train_transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.RandomCrop(224),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.482, 0.457, 0.407], std=[0.229, 0.225, 0.226]),
+        ])
+        
+        val_transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.482, 0.457, 0.407], std=[0.229, 0.225, 0.226])
+        ])
     
     return train_transform, val_transform
+
 
 def create_data_loaders() -> Tuple[DataLoader, DataLoader, int]:
     """Create training and validation data loaders and return number of classes"""
@@ -739,12 +800,17 @@ def lr_range_test(model: nn.Module, train_loader: DataLoader, criterion: nn.Modu
                 output = model(data)
                 loss = criterion(output, target)
             scaler.scale(loss).backward()
+            # Gradient clipping for mixed precision
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), GRADIENT_CLIP_VALUE)
             scaler.step(optimizer)
             scaler.update()
         else:
             output = model(data)
             loss = criterion(output, target)
             loss.backward()
+            # Gradient clipping for standard precision
+            torch.nn.utils.clip_grad_norm_(model.parameters(), GRADIENT_CLIP_VALUE)
             optimizer.step()
         
         # Record loss
