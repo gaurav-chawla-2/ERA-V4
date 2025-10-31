@@ -1223,6 +1223,31 @@ def find_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
     
     return None
 
+def setup_logging() -> logging.Logger:
+    """Setup logging configuration for the training script."""
+    # Create logs directory if it doesn't exist
+    log_dir = "./logs"
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Create timestamp for log file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = os.path.join(log_dir, f"training_{timestamp}.log")
+    
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()  # Also log to console
+        ]
+    )
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"Logging initialized. Log file: {log_file}")
+    
+    return logger
+
 # ============================================================================
 # MAIN TRAINING FUNCTION
 # ============================================================================
