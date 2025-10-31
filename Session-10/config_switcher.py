@@ -16,7 +16,7 @@ CONFIGS = {
         'DATASET_PATH': '"/data/tiny-imagenet-200"',
         'NUM_CLASSES': '200',
         'IMAGE_SIZE': '64',
-        'BATCH_SIZE': '128',
+        'BATCH_SIZE': '16',
         'MAX_EPOCHS': '50',
         'EARLY_STOP_PATIENCE': '10',
         'MIN_EPOCHS_FOR_FEEDBACK': '6',

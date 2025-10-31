@@ -135,7 +135,7 @@ class HuggingFaceImageNetDataset(Dataset):
         return image, label
 NUM_CLASSES = 1000  # ImageNet has 1000 classes (change to 200 for Tiny-ImageNet)
 IMAGE_SIZE = 224    # ImageNet uses 224x224 images (change to 64 for Tiny-ImageNet)
-BATCH_SIZE = 32     # Conservative for g4dn.xlarge NVIDIA T4 GPU memory constraints
+BATCH_SIZE = 16     # Further reduced for g4dn.xlarge NVIDIA T4 GPU memory constraints
 NUM_WORKERS = 4     # Optimized for g4dn.xlarge (4 vCPUs)
 
 # Training Configuration
@@ -683,9 +683,11 @@ def lr_range_test(model: nn.Module, train_loader: DataLoader, criterion: nn.Modu
         loss_value = loss.item()
         losses.append(loss_value)
         
-        # Clear GPU cache to prevent memory accumulation
+        # Clear GPU cache and variables to prevent memory accumulation
+        del output, loss
         if device.type == 'cuda':
             torch.cuda.empty_cache()
+            torch.cuda.synchronize()
         
         # Stop if loss explodes
         if loss_value > best_loss * 4:
@@ -1466,6 +1468,11 @@ def main():
     print(f"\n🏗️  Building ResNet50 model...")
     model = ResNet50(num_classes=NUM_CLASSES, dropout_rate=DROPOUT_RATE).to(device)
     
+    # Clear GPU cache after model creation
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+    
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -1493,7 +1500,7 @@ def main():
     if args.lr_finder or args.lr_finder_only:
         print("\n" + "="*60)
         learning_rates, losses, optimal_lr = lr_range_test(
-            model, train_loader, criterion, device, num_iter=100, scaler=scaler
+            model, train_loader, criterion, device, num_iter=50, scaler=scaler
         )
         
         # Save LR finder results
