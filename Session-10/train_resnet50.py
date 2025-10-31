@@ -1630,7 +1630,7 @@ def main():
             NUM_WORKERS = min(32, os.cpu_count())
             print(f"🚀 High-end GPU detected! Optimizing: BATCH_SIZE={BATCH_SIZE}, NUM_WORKERS={NUM_WORKERS}")
         elif gpu_memory_gb >= 35:  # A100 40GB, H100 SXM variants
-            BATCH_SIZE = 128  # Optimal setting for A100 40GB
+            BATCH_SIZE = 96  # Optimal setting for A100 40GB
             NUM_WORKERS = min(24, os.cpu_count())
             print(f"🚀 High-performance GPU detected! Optimizing: BATCH_SIZE={BATCH_SIZE}, NUM_WORKERS={NUM_WORKERS}")
         elif gpu_memory_gb >= 20:  # RTX 6000, A10, etc.
