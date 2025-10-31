@@ -1584,7 +1584,7 @@ def setup_logging() -> logging.Logger:
 
 def main():
     """Main training function"""
-    global NUM_CLASSES, INITIAL_LR
+    global NUM_CLASSES, INITIAL_LR, BATCH_SIZE, NUM_WORKERS
     import argparse
     
     # Parse command line arguments
@@ -1623,7 +1623,6 @@ def main():
         print(f"🔧 GPU Memory: {gpu_memory_gb:.1f} GB")
         
         # Dynamic batch size optimization based on GPU memory
-        global BATCH_SIZE, NUM_WORKERS, INITIAL_LR
         original_batch_size = BATCH_SIZE
         
         if gpu_memory_gb >= 75:  # H100 80GB, B200 180GB
