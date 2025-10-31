@@ -135,8 +135,8 @@ class HuggingFaceImageNetDataset(Dataset):
         return image, label
 NUM_CLASSES = 1000  # ImageNet has 1000 classes (change to 200 for Tiny-ImageNet)
 IMAGE_SIZE = 224    # ImageNet uses 224x224 images (change to 64 for Tiny-ImageNet)
-BATCH_SIZE = 96     # Optimized for T4 GPU (16GB VRAM) on g4dn.xlarge
-NUM_WORKERS = 4     # Matched to 4 vCPUs on g4dn.xlarge instance
+BATCH_SIZE = 64     # Optimized for g4ad.2xlarge (8GB VRAM)
+NUM_WORKERS = 6     # Optimized for g4ad.2xlarge (8 vCPUs)
 
 # Training Configuration
 MAX_EPOCHS = 100          # Maximum training epochs (increased for full ImageNet)
@@ -1478,7 +1478,7 @@ def main():
     if args.lr_finder or args.lr_finder_only:
         print("\n" + "="*60)
         learning_rates, losses, optimal_lr = lr_range_test(
-            model, train_loader, criterion, device, scaler=scaler
+            model, train_loader, criterion, device, num_iter=50, scaler=scaler
         )
         
         # Save LR finder results
