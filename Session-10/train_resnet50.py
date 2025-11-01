@@ -249,48 +249,73 @@ class HuggingFaceImageNetDataset(Dataset):
 # ============================================================================
 
 def get_data_transforms() -> Tuple[A.Compose, A.Compose]:
-    """Create training and validation transforms using Albumentations"""
+    """Create training and validation transforms using Albumentations with specified configuration"""
+    
+    # Augmentation configuration
+    AUGMENTATION = { 
+        "train": { 
+            "resize": 256, 
+            "crop": 224, 
+            "horizontal_flip": True, 
+            "vertical_flip": False, 
+            "rotation": 0, 
+            "color_jitter": { 
+                "brightness": 0.2, 
+                "contrast": 0.2, 
+                "saturation": 0.2, 
+                "hue": 0.1 
+            }, 
+            "normalize": { 
+                "mean": [0.482, 0.457, 0.407], 
+                "std": [0.229, 0.225, 0.226] 
+            } 
+        }, 
+        "val": { 
+            "resize": 256, 
+            "crop": 224, 
+            "horizontal_flip": False, 
+            "normalize": { 
+                "mean": [0.482, 0.457, 0.407], 
+                "std": [0.229, 0.225, 0.226] 
+            } 
+        } 
+    }
+    
+    # Extract configuration
+    train_config = AUGMENTATION["train"]
+    val_config = AUGMENTATION["val"]
+    
+    print(f"📊 Using specified augmentation configuration:")
+    print(f"   Train - Resize: {train_config['resize']}, Crop: {train_config['crop']}")
+    print(f"   Mean: {train_config['normalize']['mean']}")
+    print(f"   Std:  {train_config['normalize']['std']}")
     
     # Training transforms with augmentation
     train_transform = A.Compose([
-        A.Resize(height=IMAGE_SIZE, width=IMAGE_SIZE),
-        A.HorizontalFlip(p=0.5),
-        A.ShiftScaleRotate(
-            shift_limit=0.1,
-            scale_limit=0.1,
-            rotate_limit=15,
-            p=0.5
-        ),
+        A.Resize(height=train_config["resize"], width=train_config["resize"]),
+        A.RandomCrop(height=train_config["crop"], width=train_config["crop"]),
+        A.HorizontalFlip(p=0.5 if train_config["horizontal_flip"] else 0.0),
         A.ColorJitter(
-            brightness=0.2,
-            contrast=0.2,
-            saturation=0.2,
-            hue=0.1,
-            p=0.5
-        ),
-        A.CoarseDropout(
-            max_holes=8,
-            max_height=16,
-            max_width=16,
-            min_holes=1,
-            min_height=8,
-            min_width=8,
-            fill_value=0,
-            p=0.3
+            brightness=train_config["color_jitter"]["brightness"],
+            contrast=train_config["color_jitter"]["contrast"],
+            saturation=train_config["color_jitter"]["saturation"],
+            hue=train_config["color_jitter"]["hue"],
+            p=0.8
         ),
         A.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225]
+            mean=train_config["normalize"]["mean"],
+            std=train_config["normalize"]["std"]
         ),
         ToTensorV2()
     ])
     
-    # Validation transforms (no augmentation)
+    # Validation transforms (no augmentation, center crop)
     val_transform = A.Compose([
-        A.Resize(height=IMAGE_SIZE, width=IMAGE_SIZE),
+        A.Resize(height=val_config["resize"], width=val_config["resize"]),
+        A.CenterCrop(height=val_config["crop"], width=val_config["crop"]),
         A.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225]
+            mean=val_config["normalize"]["mean"],
+            std=val_config["normalize"]["std"]
         ),
         ToTensorV2()
     ])

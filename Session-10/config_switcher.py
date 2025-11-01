@@ -120,6 +120,70 @@ CONFIGS = {
         'DATASET_MEAN': 'None',  # Will be auto-populated
         'DATASET_STD': 'None',   # Will be auto-populated
         'OPTIMAL_LR_COMPUTED': 'None',  # Will be auto-populated
+    },
+    
+    'imagenet-8xa100': {
+        # Dataset Configuration
+        'DATASET_PATH': '"/lambda/nfs/ERAv4S09/imagenet/full_dataset"',
+        'NUM_CLASSES': '1000',
+        'IMAGE_SIZE': '224',
+        'VALIDATION_SPLIT': '0.2',
+        
+        # Training Configuration - Optimized for 8x A100 (40GB SXM4)
+        'BATCH_SIZE': '128',   # 128 per GPU with mixed precision
+        'NUM_WORKERS': '15',   # 15 workers per GPU (120 total for 124 vCPUs)
+        'GRADIENT_ACCUMULATION_STEPS': '1',  # No accumulation needed
+        'USE_GRADIENT_ACCUMULATION': 'False',
+        'MAX_EPOCHS': '20',    # Faster convergence with large batch
+        'EARLY_STOP_PATIENCE': '5',
+        'MIN_EPOCHS_FOR_FEEDBACK': '4',
+        'TARGET_ACCURACY': '76.0',
+        
+        # Model Configuration
+        'DROPOUT_RATE': '0.1',
+        'LABEL_SMOOTHING': '0.1',
+        
+        # Optimizer Configuration - Scaled for effective batch size 1024
+        'OPTIMIZER_TYPE': "'SGD'",
+        'INITIAL_LR': '0.4',   # Linear scaling for 4x larger effective batch
+        'MOMENTUM': '0.9',
+        'WEIGHT_DECAY': '1e-4',
+        'GRADIENT_CLIP_VALUE': '1.0',
+        
+        # Mixed Precision
+        'USE_MIXED_PRECISION': 'True',
+        
+        # OneCycle LR Scheduler
+        'USE_ONECYCLE_LR': 'True',
+        'ONECYCLE_MAX_LR': '0.4',
+        'ONECYCLE_PCT_START': '0.3',
+        'ONECYCLE_DIV_FACTOR': '25.0',
+        'ONECYCLE_FINAL_DIV_FACTOR': '1e4',
+        
+        # Logging and Visualization
+        'SAVE_DIR': '"./results"',
+        'LOG_INTERVAL': '25',
+        'PLOT_STYLE': "'seaborn-v0_8'",
+        'PLOT_FREQUENCY': '3',
+        'VALIDATION_FREQUENCY': '1',
+        
+        # Checkpointing
+        'CHECKPOINT_DIR': '"./checkpoints"',
+        'SAVE_CHECKPOINT_EVERY': '3',
+        'RESUME_FROM_CHECKPOINT': 'None',
+        
+        # LR Finder Configuration
+        'LR_FINDER_START_LR': '1e-7',
+        'LR_FINDER_END_LR': '10',
+        'LR_FINDER_NUM_ITER': '100',
+        
+        # Data Augmentation
+        'USE_ALBUMENTATIONS': 'True',
+        
+        # Computed Statistics (auto-populated)
+        'DATASET_MEAN': 'None',  # Will be auto-populated
+        'DATASET_STD': 'None',   # Will be auto-populated
+        'OPTIMAL_LR_COMPUTED': 'None',  # Will be auto-populated
     }
 }
 
@@ -350,7 +414,8 @@ def main():
         print()
         print("Commands:")
         print("  tiny-imagenet     - Switch to Tiny-ImageNet configuration")
-        print("  imagenet          - Switch to full ImageNet configuration")
+        print("  imagenet          - Switch to full ImageNet configuration (T4 GPU)")
+        print("  imagenet-8xa100   - Switch to ImageNet configuration (8x A100 40GB)")
         print("  show              - Show current configuration and stored values")
         print("  store-stats       - Store computed dataset statistics")
         print("  store-lr          - Store optimal learning rate")
@@ -392,7 +457,7 @@ def main():
             print("📁 No cache to clear")
     else:
         print(f"❌ Unknown command: {command}")
-        print("Available commands: tiny-imagenet, imagenet, show, store-stats, store-lr, clear-cache")
+        print("Available commands: tiny-imagenet, imagenet, imagenet-8xa100, show, store-stats, store-lr, clear-cache")
 
 if __name__ == "__main__":
     main()
