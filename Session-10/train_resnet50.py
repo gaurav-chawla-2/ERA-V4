@@ -41,63 +41,111 @@ except ImportError:
     HF_DATASETS_AVAILABLE = False
 warnings.filterwarnings('ignore')
 
-# Configuration integration functions
+# ============================================================================
+# CONFIGURATION PARAMETERS - Modify these for different experiments
+# ============================================================================
+
+# Dataset Configuration
+DATASET_PATH = "/lambda/nfs/ERAv4S09/imagenet/full_dataset"  # Path to ImageNet dataset (change to tiny-imagenet-200 for Tiny-ImageNet)
+NUM_CLASSES = 1000  # ImageNet has 1000 classes
+IMAGE_SIZE = 224    # ImageNet uses 224x224 images
+
+# Training Configuration
+BATCH_SIZE = 128    # Optimized for 8x A100 40GB with mixed precision (128 per GPU)
+NUM_WORKERS = 15    # Optimized for 124 vCPUs (15 workers per GPU, 8 GPUs = 120 workers)
+GRADIENT_ACCUMULATION_STEPS = 1  # No accumulation needed with large batch size
+USE_GRADIENT_ACCUMULATION = False  # Disabled - not needed with 8x GPUs and large batch size
+
+# Epoch and Early Stopping Configuration
+MAX_EPOCHS = 20           # Reduced epochs due to faster convergence with large batch size
+EARLY_STOP_PATIENCE = 5   # Reduced patience for faster convergence with large batch size
+TARGET_ACCURACY = 76.0   # Slightly higher target with better hardware
+MIN_EPOCHS_FOR_FEEDBACK = 4      # Reduced due to faster convergence
+
+# Model Configuration
+DROPOUT_RATE = 0.1        # Standard dropout rate
+LABEL_SMOOTHING = 0.1     # Label smoothing for better generalization
+
+# Optimizer Configuration
+OPTIMIZER_TYPE = 'SGD'    # SGD often works better for full ImageNet
+INITIAL_LR = 0.4          # Scaled for effective batch size 1024 (128*8) using linear scaling rule
+MOMENTUM = 0.9            # Momentum for SGD optimizer
+WEIGHT_DECAY = 1e-4       # Standard weight decay
+GRADIENT_CLIP_VALUE = 1.0 # Gradient clipping for training stability
+
+# Data Augmentation Configuration
+USE_ALBUMENTATIONS = True  # Use Albumentations for data augmentation
+
+# Logging and Visualization Configuration
+SAVE_DIR = "./results"    # Directory to save results
+LOG_INTERVAL = 25         # More frequent logging due to faster training
+PLOT_FREQUENCY = 3        # More frequent plots due to fewer epochs
+VALIDATION_FREQUENCY = 1  # Run validation every epoch
+PLOT_STYLE = 'seaborn-v0_8'      # Matplotlib style for plots
+
+# Mixed Precision Configuration
+USE_MIXED_PRECISION = True        # Enable automatic mixed precision for faster training
+
+# Learning Rate Scheduler Configuration
+USE_ONECYCLE_LR = True           # Use OneCycleLR for faster convergence
+ONECYCLE_MAX_LR = 0.4            # Scaled for effective batch size 1024 (128*8)
+ONECYCLE_PCT_START = 0.3         # Longer warmup for large batch size stability
+ONECYCLE_DIV_FACTOR = 25.0       # Conservative initial LR (max_lr/25 = 0.016)
+ONECYCLE_FINAL_DIV_FACTOR = 1e4  # Strong final decay for fine-tuning
+
+# Checkpoint Configuration
+CHECKPOINT_DIR = "./checkpoints"  # Directory to save checkpoints
+SAVE_CHECKPOINT_EVERY = 3         # Save checkpoint every N epochs (more frequent due to fewer total epochs)
+RESUME_FROM_CHECKPOINT = None     # Path to checkpoint to resume from (None to start fresh)
+
+# ============================================================================
+# UTILITY FUNCTIONS - Helper functions for data persistence
+# ============================================================================
+
 def load_stored_stats():
-    """Load stored dataset statistics if available."""
-    try:
-        from config_switcher import ConfigManager
-        config_manager = ConfigManager()
-        stats = config_manager.load_stored_stats()
-        if stats:
-            mean = torch.tensor(stats['mean'])
-            std = torch.tensor(stats['std'])
-            print(f"✓ Loaded stored dataset statistics:")
-            print(f"  Mean: {mean.tolist()}")
-            print(f"  Std: {std.tolist()}")
-            return mean, std
-    except Exception as e:
-        print(f"Note: Could not load stored statistics: {e}")
+    """Load stored dataset statistics if available"""
+    stats_file = os.path.join(SAVE_DIR, 'dataset_stats.json')
+    if os.path.exists(stats_file):
+        try:
+            with open(stats_file, 'r') as f:
+                stats = json.load(f)
+            return torch.tensor(stats['mean']), torch.tensor(stats['std'])
+        except:
+            return None, None
     return None, None
 
 def load_stored_lr():
-    """Load stored optimal learning rate if available."""
-    try:
-        from config_switcher import ConfigManager
-        config_manager = ConfigManager()
-        lr = config_manager.load_stored_lr()
-        if lr:
-            print(f"✓ Loaded stored optimal learning rate: {lr}")
-            return lr
-    except Exception as e:
-        print(f"Note: Could not load stored learning rate: {e}")
+    """Load stored optimal learning rate if available"""
+    lr_file = os.path.join(SAVE_DIR, 'optimal_lr.json')
+    if os.path.exists(lr_file):
+        try:
+            with open(lr_file, 'r') as f:
+                data = json.load(f)
+            return data['optimal_lr']
+        except:
+            return None
     return None
 
 def store_computed_stats(mean, std):
-    """Store computed dataset statistics."""
-    try:
-        from config_switcher import ConfigManager
-        config_manager = ConfigManager()
-        config_manager.store_stats(mean.tolist(), std.tolist())
-        print(f"✓ Stored dataset statistics for future use")
-    except Exception as e:
-        print(f"Warning: Could not store statistics: {e}")
+    """Store computed dataset statistics"""
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    stats = {
+        'mean': mean.tolist(),
+        'std': std.tolist()
+    }
+    with open(os.path.join(SAVE_DIR, 'dataset_stats.json'), 'w') as f:
+        json.dump(stats, f)
 
 def store_optimal_lr(lr):
-    """Store optimal learning rate."""
-    try:
-        from config_switcher import ConfigManager
-        config_manager = ConfigManager()
-        config_manager.store_lr(lr)
-        print(f"✓ Stored optimal learning rate: {lr}")
-    except Exception as e:
-        print(f"Warning: Could not store learning rate: {e}")
+    """Store optimal learning rate"""
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    data = {'optimal_lr': lr}
+    with open(os.path.join(SAVE_DIR, 'optimal_lr.json'), 'w') as f:
+        json.dump(data, f)
 
 # ============================================================================
-# CONFIGURATION PARAMETERS - Modify these for different experiments
-# ============================================================================# Configuration Parameters
-# Dataset Configuration
-DATASET_PATH = "/lambda/nfs/ERAv4S09/imagenet/full_dataset"  # Path to ImageNet dataset (change to tiny-imagenet-200 for Tiny-ImageNet)
-
+# DATASET CLASSES
+# ============================================================================
 
 class HuggingFaceImageNetDataset(Dataset):
     """Custom dataset class for Hugging Face ImageNet datasets with Arrow format."""
@@ -195,122 +243,172 @@ class HuggingFaceImageNetDataset(Dataset):
                 image = self.transform(image)
         
         return image, label
-NUM_CLASSES = 1000  # ImageNet has 1000 classes
-IMAGE_SIZE = 224    # ImageNet uses 224x224 images
-BATCH_SIZE = 64     # Balanced for 224x224 images on A100 40GB
-NUM_WORKERS = 24    # Optimized for high-end instances (26-30 vCPUs available)
-
-# Gradient Accumulation Configuration (simulates larger batch sizes)
-GRADIENT_ACCUMULATION_STEPS = 4  # Effective batch size = BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS
-USE_GRADIENT_ACCUMULATION = True  # Enable gradient accumulation for better convergence
-
-# Training Configuration
-MAX_EPOCHS = 25           # Optimized for OneCycleLR - faster convergence than cosine annealing
-EARLY_STOP_PATIENCE = 8   # Reduced patience for faster convergence detection
-MIN_EPOCHS_FOR_FEEDBACK = 5  # Earlier feedback for faster iteration
-TARGET_ACCURACY = 75.0   # Target accuracy percentage (realistic for full ImageNet)
-VALIDATION_SPLIT = 0.2    # Validation split ratio
-WARMUP_EPOCHS = 2         # Number of warmup epochs for stable training start
-
-# Model Configuration
-DROPOUT_RATE = 0.1        # Standard dropout rate
-LABEL_SMOOTHING = 0.1     # Label smoothing for better generalization
-
-# Optimizer Configuration
-OPTIMIZER_TYPE = 'SGD'    # SGD often works better for full ImageNet
-INITIAL_LR = 0.1          # Higher LR for larger batch size (linear scaling rule)
-MOMENTUM = 0.9            # Momentum for SGD optimizer
-WEIGHT_DECAY = 1e-4       # Standard weight decay
-GRADIENT_CLIP_VALUE = 1.0 # Gradient clipping for training stability
-
-# Simplified Augmentation Configuration
-USE_ALBUMENTATIONS = True  # Use Albumentations for data augmentation
-USE_CUTMIX = False         # Disable CutMix to keep training simple
-USE_MIXUP = False          # Disable MixUp to keep training simple
-
-# Visualization and Logging
-SAVE_DIR = "./results"    # Directory to save results
-LOG_INTERVAL = 50         # Reduced logging frequency for speed (was 10)
-PLOT_FREQUENCY = 5        # Generate plots every N epochs
-VALIDATION_FREQUENCY = 1  # Run validation every epoch
-
-# Mixed Precision Training Configuration
-USE_MIXED_PRECISION = True        # Enable automatic mixed precision for faster training
-
-# Learning Rate Scheduler Configuration
-USE_ONECYCLE_LR = True           # Use OneCycleLR for faster convergence (recommended for budget training)
-USE_COSINE_ANNEALING = False     # Use cosine annealing scheduler (alternative to OneCycleLR)
-
-# OneCycleLR Configuration (optimal for effective batch size 256)
-ONECYCLE_MAX_LR = 0.02           # Optimal for effective batch size 256 (64*4)
-ONECYCLE_PCT_START = 0.25        # Proper warmup for stable convergence
-ONECYCLE_DIV_FACTOR = 20.0       # Conservative initial LR (max_lr/20 = 0.001)
-ONECYCLE_FINAL_DIV_FACTOR = 1e4  # Strong final decay for fine-tuning
-
-# Cosine Annealing Configuration (if USE_COSINE_ANNEALING = True)
-COSINE_T_MAX = 30                 # T_max for cosine annealing (matches MAX_EPOCHS)
-COSINE_ETA_MIN = 1e-6             # Minimum learning rate for cosine annealing
-
-# Checkpoint Configuration
-CHECKPOINT_DIR = "./checkpoints"  # Directory to save checkpoints
-SAVE_CHECKPOINT_EVERY = 5         # Save checkpoint every N epochs
-RESUME_FROM_CHECKPOINT = None     # Path to checkpoint to resume from (None to start fresh)
 
 # ============================================================================
-# CUSTOM DATASET CLASSES
+# DATA PROCESSING FUNCTIONS
 # ============================================================================
 
-class TinyImageNetValidationDataset(Dataset):
-    """Custom dataset for Tiny-ImageNet validation set using val_annotations.txt"""
+def get_data_transforms() -> Tuple[A.Compose, A.Compose]:
+    """Create training and validation transforms using Albumentations"""
     
-    def __init__(self, val_dir: str, annotations_file: str, class_to_idx: Dict[str, int], transform=None):
-        """
-        Args:
-            val_dir: Path to validation images directory
-            annotations_file: Path to val_annotations.txt
-            class_to_idx: Dictionary mapping class names to indices (from training set)
-            transform: Optional transform to be applied on images
-        """
-        self.val_dir = val_dir
-        self.transform = transform
-        self.class_to_idx = class_to_idx
-        
-        # Parse annotations file
-        self.samples = []
-        with open(annotations_file, 'r') as f:
-            for line in f:
-                parts = line.strip().split('\t')
-                if len(parts) >= 2:
-                    img_name = parts[0]
-                    class_name = parts[1]
-                    if class_name in class_to_idx:
-                        img_path = os.path.join(val_dir, img_name)
-                        if os.path.exists(img_path):
-                            self.samples.append((img_path, class_to_idx[class_name]))
-        
-        print(f"✅ Loaded {len(self.samples)} validation samples with proper class alignment")
+    # Training transforms with augmentation
+    train_transform = A.Compose([
+        A.Resize(height=IMAGE_SIZE, width=IMAGE_SIZE),
+        A.HorizontalFlip(p=0.5),
+        A.ShiftScaleRotate(
+            shift_limit=0.1,
+            scale_limit=0.1,
+            rotate_limit=15,
+            p=0.5
+        ),
+        A.ColorJitter(
+            brightness=0.2,
+            contrast=0.2,
+            saturation=0.2,
+            hue=0.1,
+            p=0.5
+        ),
+        A.CoarseDropout(
+            max_holes=8,
+            max_height=16,
+            max_width=16,
+            min_holes=1,
+            min_height=8,
+            min_width=8,
+            fill_value=0,
+            p=0.3
+        ),
+        A.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        ),
+        ToTensorV2()
+    ])
     
-    def __len__(self):
-        return len(self.samples)
+    # Validation transforms (no augmentation)
+    val_transform = A.Compose([
+        A.Resize(height=IMAGE_SIZE, width=IMAGE_SIZE),
+        A.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        ),
+        ToTensorV2()
+    ])
     
-    def __getitem__(self, idx):
-        img_path, label = self.samples[idx]
+    return train_transform, val_transform
+
+def create_data_loaders() -> Tuple[DataLoader, DataLoader, int]:
+    """Create training and validation data loaders with automatic dataset detection"""
+    
+    print(f"\n📁 Loading dataset from: {DATASET_PATH}")
+    
+    # Get transforms
+    train_transform, val_transform = get_data_transforms()
+    
+    # Detect dataset type and format
+    is_tiny_imagenet = 'tiny-imagenet' in DATASET_PATH.lower()
+    
+    # Check if it's a Hugging Face dataset (has dataset_dict.json or .arrow files)
+    is_hf_dataset = (
+        os.path.exists(os.path.join(DATASET_PATH, 'dataset_dict.json')) or
+        any(f.endswith('.arrow') for f in os.listdir(DATASET_PATH) if os.path.isfile(os.path.join(DATASET_PATH, f)))
+    )
+    
+    if is_hf_dataset:
+        print(f"🔍 Detected dataset format: Hugging Face datasets (Arrow format)")
+        print(f"🔍 Dataset type: {'Tiny-ImageNet' if is_tiny_imagenet else 'Full ImageNet'}")
         
-        # Load image
-        image = Image.open(img_path).convert('RGB')
+        # Load Hugging Face datasets
+        try:
+            train_dataset = HuggingFaceImageNetDataset(
+                dataset_path=DATASET_PATH,
+                split='train',
+                transform=train_transform
+            )
+            
+            val_dataset = HuggingFaceImageNetDataset(
+                dataset_path=DATASET_PATH,
+                split='validation',
+                transform=val_transform
+            )
+            
+            # Get class information from training dataset
+            num_classes = len(train_dataset.classes)
+            class_to_idx = train_dataset.class_to_idx
+            
+        except Exception as e:
+            print(f"❌ Error loading Hugging Face dataset: {str(e)}")
+            raise
+    
+    else:
+        print(f"🔍 Detected dataset format: Standard ImageFolder format")
+        print(f"🔍 Dataset type: {'Tiny-ImageNet' if is_tiny_imagenet else 'Full ImageNet'}")
         
-        if self.transform:
-            if USE_ALBUMENTATIONS and hasattr(self.transform, '__call__'):
-                # For Albumentations, convert PIL to numpy array
-                image_array = np.array(image)
-                # Apply Albumentations transform
-                transformed = self.transform(image=image_array)
-                image = transformed['image']
-            else:
-                # For torchvision transforms
-                image = self.transform(image)
-        
-        return image, label
+        # Load datasets using standard ImageFolder format
+        try:
+            # Load training dataset
+            train_dataset = datasets.ImageFolder(
+                root=os.path.join(DATASET_PATH, 'train'),
+                transform=train_transform
+            )
+            
+            # Auto-detect number of classes and get class mapping
+            num_classes = len(train_dataset.classes)
+            class_to_idx = train_dataset.class_to_idx
+            
+            # Load validation dataset
+            val_dataset = datasets.ImageFolder(
+                root=os.path.join(DATASET_PATH, 'val'),
+                transform=val_transform
+            )
+            
+        except Exception as e:
+            print(f"❌ Error loading standard ImageFolder dataset: {str(e)}")
+            raise
+    
+    # Print dataset information
+    print(f"✅ Dataset loaded successfully!")
+    print(f"   📊 Training samples: {len(train_dataset):,}")
+    print(f"   📊 Validation samples: {len(val_dataset):,}")
+    print(f"   🏷️  Number of classes: {num_classes}")
+    print(f"   📏 Image size: {IMAGE_SIZE}x{IMAGE_SIZE}")
+    
+    # Create data loaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=NUM_WORKERS,
+        pin_memory=True,
+        persistent_workers=True if NUM_WORKERS > 0 else False
+    )
+    
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=NUM_WORKERS,
+        pin_memory=True,
+        persistent_workers=True if NUM_WORKERS > 0 else False
+    )
+    
+    print(f"   🔄 Training batches: {len(train_loader):,}")
+    print(f"   🔄 Validation batches: {len(val_loader):,}")
+    print(f"   📦 Batch size: {BATCH_SIZE}")
+    print(f"   👥 Workers: {NUM_WORKERS}")
+    
+    return train_loader, val_loader, num_classes
+
+def create_optimizer(parameters, optimizer_type: str, lr: float, momentum: float, weight_decay: float):
+    """Create optimizer based on configuration"""
+    if optimizer_type.upper() == 'SGD':
+        return optim.SGD(parameters, lr=lr, momentum=momentum, weight_decay=weight_decay)
+    elif optimizer_type.upper() == 'ADAM':
+        return optim.Adam(parameters, lr=lr, weight_decay=weight_decay)
+    elif optimizer_type.upper() == 'ADAMW':
+        return optim.AdamW(parameters, lr=lr, weight_decay=weight_decay)
+    else:
+        raise ValueError(f"Unsupported optimizer: {optimizer_type}")
 
 # ============================================================================
 # RESNET50 IMPLEMENTATION - Clear layer-by-layer architecture
@@ -473,276 +571,50 @@ class ResNet50(nn.Module):
 # ... existing code ...
 
 # ============================================================================
-# OPTIMIZER FACTORY FUNCTION
-# ============================================================================
-
-def create_optimizer(parameters, optimizer_type: str, lr: float, momentum: float, weight_decay: float):
-    """Create optimizer based on type"""
-    if optimizer_type == 'SGD':
-        return optim.SGD(parameters, lr=lr, momentum=momentum, weight_decay=weight_decay)
-    elif optimizer_type == 'AdamW':
-        return optim.AdamW(parameters, lr=lr, weight_decay=weight_decay)
-    else:
-        raise ValueError(f"Unsupported optimizer type: {optimizer_type}")
-
-# ============================================================================
-# DATA LOADING AND PREPROCESSING
-# ============================================================================
-
-def get_data_transforms() -> Tuple[A.Compose, A.Compose]:
-    """Get training and validation data transforms using Albumentations"""
-    
-    if USE_ALBUMENTATIONS:
-        # Training transforms matching the specified configuration
-        train_transform = A.Compose([
-            # Resize to 256, then crop to 224
-            A.Resize(256, 256),
-            A.RandomCrop(224, 224),
-            
-            # Horizontal flip only (no vertical flip, no rotation)
-            A.HorizontalFlip(p=0.5),
-            
-            # Color jitter with exact specified values
-            A.ColorJitter(
-                brightness=0.2, 
-                contrast=0.2, 
-                saturation=0.2, 
-                hue=0.1, 
-                p=1.0
-            ),
-            
-            # Normalization with specified values
-            A.Normalize(mean=[0.482, 0.457, 0.407], std=[0.229, 0.225, 0.226]),
-            ToTensorV2(),
-        ])
-        
-        # Validation transforms (no augmentation)
-        val_transform = A.Compose([
-            A.Resize(256, 256),
-            A.CenterCrop(224, 224),
-            A.Normalize(mean=[0.482, 0.457, 0.407], std=[0.229, 0.225, 0.226]),
-            ToTensorV2(),
-        ])
-        
-    else:
-        # Fallback to torchvision transforms with matching configuration
-        train_transform = transforms.Compose([
-            transforms.Resize(256),
-            transforms.RandomCrop(224),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.482, 0.457, 0.407], std=[0.229, 0.225, 0.226]),
-        ])
-        
-        val_transform = transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.482, 0.457, 0.407], std=[0.229, 0.225, 0.226])
-        ])
-    
-    return train_transform, val_transform
-
-
-def create_data_loaders() -> Tuple[DataLoader, DataLoader, int]:
-    """Create training and validation data loaders and return number of classes"""
-    
-    train_transform, val_transform = get_data_transforms()
-    
-    # Check if dataset exists
-    if not os.path.exists(DATASET_PATH):
-        print(f"❌ Dataset not found at {DATASET_PATH}")
-        print("Please download the dataset and extract it to the specified path.")
-        raise FileNotFoundError(f"Dataset not found at {DATASET_PATH}")
-    
-    # Detect dataset type and format
-    is_tiny_imagenet = 'tiny-imagenet' in DATASET_PATH.lower()
-    
-    # Check if it's a Hugging Face dataset (has dataset_dict.json or .arrow files)
-    is_hf_dataset = (
-        os.path.exists(os.path.join(DATASET_PATH, 'dataset_dict.json')) or
-        any(f.endswith('.arrow') for f in os.listdir(DATASET_PATH) if os.path.isfile(os.path.join(DATASET_PATH, f)))
-    )
-    
-    if is_hf_dataset:
-        print(f"🔍 Detected dataset format: Hugging Face datasets (Arrow format)")
-        print(f"🔍 Dataset type: {'Tiny-ImageNet' if is_tiny_imagenet else 'Full ImageNet'}")
-        
-        # Load Hugging Face datasets
-        try:
-            train_dataset = HuggingFaceImageNetDataset(
-                dataset_path=DATASET_PATH,
-                split='train',
-                transform=train_transform
-            )
-            
-            val_dataset = HuggingFaceImageNetDataset(
-                dataset_path=DATASET_PATH,
-                split='validation',
-                transform=val_transform
-            )
-            
-            # Get class information from training dataset
-            num_classes = len(train_dataset.classes)
-            class_to_idx = train_dataset.class_to_idx
-            
-        except Exception as e:
-            print(f"❌ Error loading Hugging Face dataset: {str(e)}")
-            raise
-    
-    else:
-        print(f"🔍 Detected dataset format: Standard ImageFolder format")
-        print(f"🔍 Dataset type: {'Tiny-ImageNet' if is_tiny_imagenet else 'Full ImageNet'}")
-        
-        # Load datasets using standard ImageFolder format
-        try:
-            # Load training dataset
-            train_dataset = datasets.ImageFolder(
-                root=os.path.join(DATASET_PATH, 'train'),
-                transform=train_transform
-            )
-            
-            # Auto-detect number of classes and get class mapping
-            num_classes = len(train_dataset.classes)
-            class_to_idx = train_dataset.class_to_idx
-            
-            # Load validation dataset based on dataset type
-            if is_tiny_imagenet:
-                # Tiny-ImageNet has special validation structure
-                val_images_dir = os.path.join(DATASET_PATH, 'val', 'images')
-                val_annotations_file = os.path.join(DATASET_PATH, 'val', 'val_annotations.txt')
-                
-                if os.path.exists(val_annotations_file):
-                    print("📝 Using Tiny-ImageNet validation with annotations")
-                    val_dataset = TinyImageNetValidationDataset(
-                        val_dir=val_images_dir,
-                        annotations_file=val_annotations_file,
-                        class_to_idx=class_to_idx,
-                        transform=val_transform
-                    )
-                else:
-                    print("⚠️  val_annotations.txt not found, falling back to ImageFolder")
-                    val_dataset = datasets.ImageFolder(
-                        root=os.path.join(DATASET_PATH, 'val'),
-                        transform=val_transform
-                    )
-            else:
-                # Full ImageNet validation loading
-                val_path = os.path.join(DATASET_PATH, 'val')
-                if not os.path.exists(val_path):
-                    # Try alternative validation path names
-                    alt_paths = ['validation', 'valid', 'test']
-                    for alt in alt_paths:
-                        alt_path = os.path.join(DATASET_PATH, alt)
-                        if os.path.exists(alt_path):
-                            val_path = alt_path
-                            break
-                    else:
-                        raise FileNotFoundError(f"Validation directory not found. Tried: val, validation, valid, test")
-                
-                val_dataset = datasets.ImageFolder(
-                    root=val_path,
-                    transform=val_transform
-                )
-        
-        except Exception as e:
-            print(f"❌ Error loading dataset: {str(e)}")
-            print("Expected structure for Tiny-ImageNet:")
-            print(f"{DATASET_PATH}/")
-            print("  ├── train/")
-            print("  │   ├── class1/")
-            print("  │   ├── class2/")
-            print("  │   └── ...")
-            print("  └── val/")
-            print("      ├── images/")
-            print("      └── val_annotations.txt")
-            print()
-            print("Expected structure for full ImageNet:")
-            print(f"{DATASET_PATH}/")
-            print("  ├── train/")
-            print("  │   ├── class1/")
-            print("  │   ├── class2/")
-            print("  │   └── ...")
-            print("  └── val/ (or validation/)")
-            print("      ├── class1/")
-            print("      ├── class2/")
-            print("      └── ...")
-            raise
-    
-    # Create data loaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=NUM_WORKERS,
-        pin_memory=True,
-        drop_last=True
-    )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        num_workers=NUM_WORKERS,
-        pin_memory=True,
-        drop_last=False
-    )
-    
-    print(f"✅ Dataset loaded successfully!")
-    print(f"   📊 Training samples: {len(train_dataset):,}")
-    print(f"   📊 Validation samples: {len(val_dataset):,}")
-    print(f"   📊 Number of classes: {num_classes}")
-    print(f"   📊 Batch size: {BATCH_SIZE}")
-    
-    return train_loader, val_loader, num_classes
-
-# ============================================================================
 # DATASET STATISTICS AND LR FINDER
 # ============================================================================
 
 def compute_dataset_stats(data_loader: DataLoader, device: torch.device, num_samples: int = 1000) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Compute mean and std of the dataset for normalization
+    """Compute dataset statistics (mean and std) for normalization"""
+    print(f"\n📊 Computing dataset statistics from {num_samples} samples...")
     
-    Args:
-        data_loader: DataLoader for the dataset
-        device: Device to run computations on
-        num_samples: Number of samples to use for statistics (for efficiency)
-    
-    Returns:
-        Tuple of (mean, std) tensors
-    """
-    print("🔍 Computing dataset statistics...")
-    
+    # Initialize accumulators
     mean = torch.zeros(3)
     std = torch.zeros(3)
     total_samples = 0
     
-    with torch.no_grad():
-        for i, (data, _) in enumerate(data_loader):
-            if total_samples >= num_samples:
-                break
-                
-            batch_samples = data.size(0)
-            data = data.view(batch_samples, data.size(1), -1)
-            mean += data.mean(2).sum(0)
-            std += data.std(2).sum(0)
-            total_samples += batch_samples
+    # Compute statistics
+    for batch_idx, (data, _) in enumerate(data_loader):
+        if total_samples >= num_samples:
+            break
+            
+        # Move to device for computation
+        data = data.to(device)
+        batch_samples = data.size(0)
+        
+        # Reshape to (batch_size * height * width, channels)
+        data = data.view(batch_samples, data.size(1), -1)
+        
+        # Compute mean and std for this batch
+        batch_mean = data.mean(2).sum(0)
+        batch_std = data.std(2).sum(0)
+        
+        mean += batch_mean.cpu()
+        std += batch_std.cpu()
+        total_samples += batch_samples
+        
+        if batch_idx % 10 == 0:
+            print(f"   Processed {total_samples}/{num_samples} samples...")
     
-    mean /= total_samples
-    std /= total_samples
+    # Normalize by number of samples
+    mean /= len(data_loader)
+    std /= len(data_loader)
     
-    print(f"📊 Dataset Statistics:")
-    print(f"   Mean: [{mean[0]:.4f}, {mean[1]:.4f}, {mean[2]:.4f}]")
-    print(f"   Std:  [{std[0]:.4f}, {std[1]:.4f}, {std[2]:.4f}]")
-    print(f"   Computed from {total_samples} samples")
-    
-    # Automatically store the computed statistics
-    store_computed_stats(mean, std)
+    print(f"✅ Dataset statistics computed:")
+    print(f"   Mean: [{mean[0]:.6f}, {mean[1]:.6f}, {mean[2]:.6f}]")
+    print(f"   Std:  [{std[0]:.6f}, {std[1]:.6f}, {std[2]:.6f}]")
     
     return mean, std
-
 
 def lr_range_test(model: nn.Module, train_loader: DataLoader, criterion: nn.Module, 
                   device: torch.device, start_lr: float = 1e-7, end_lr: float = 10, 
@@ -884,9 +756,6 @@ def find_optimal_lr(learning_rates: List[float], losses: List[float]) -> float:
     
     optimal_lr = learning_rates[optimal_idx]
     
-    # Automatically store the optimal learning rate
-    store_optimal_lr(optimal_lr)
-    
     return optimal_lr
 
 
@@ -946,7 +815,6 @@ def plot_lr_finder(learning_rates: List[float], losses: List[float], optimal_lr:
     plt.close()
     
     print(f"📊 LR finder plot saved to: {SAVE_DIR}/lr_finder.png")
-
 
 # ============================================================================
 # TRAINING AND VALIDATION FUNCTIONS
@@ -1394,21 +1262,23 @@ def print_training_summary(train_losses: List[float], train_accs: List[float],
 def check_early_progress(val_accs: List[float], epoch: int) -> bool:
     """Check if training is progressing well in early epochs"""
     
-    if epoch < MIN_EPOCHS_FOR_FEEDBACK:
+    min_epochs_check = 5  # Check progress after 5 epochs
+    
+    if epoch < min_epochs_check:
         return True
     
-    if len(val_accs) < MIN_EPOCHS_FOR_FEEDBACK:
+    if len(val_accs) < min_epochs_check:
         return True
     
     # Check if validation accuracy is improving
-    recent_accs = val_accs[-MIN_EPOCHS_FOR_FEEDBACK:]
+    recent_accs = val_accs[-min_epochs_check:]
     initial_acc = recent_accs[0]
     current_acc = recent_accs[-1]
     improvement = current_acc - initial_acc
     
-    if improvement < 5.0:  # Less than 5% improvement in 6 epochs
+    if improvement < 5.0:  # Less than 5% improvement in 5 epochs
         print(f"\n⚠️  WARNING: Low progress detected!")
-        print(f"   Validation accuracy improved by only {improvement:.2f}% in {MIN_EPOCHS_FOR_FEEDBACK} epochs")
+        print(f"   Validation accuracy improved by only {improvement:.2f}% in {min_epochs_check} epochs")
         print(f"   Current accuracy: {current_acc:.2f}%")
         print(f"   Consider adjusting hyperparameters if this continues...")
         return False
@@ -1666,13 +1536,7 @@ def main():
         print(f"⚠️  Updating NUM_CLASSES from {NUM_CLASSES} to {actual_num_classes}")
         NUM_CLASSES = actual_num_classes
     
-    # Automatically load stored learning rate if available (unless manual override)
-    if not (args.lr_finder or args.lr_finder_only):
-        stored_lr = load_stored_lr()
-        if stored_lr and not args.compute_stats and not args.stats_only:
-            print(f"\n🔄 Using stored optimal learning rate: {stored_lr:.2e}")
-            print(f"   Previous LR in config: {INITIAL_LR:.2e}")
-            INITIAL_LR = stored_lr
+
     
     # Compute dataset statistics if requested
     if args.compute_stats or args.stats_only:
@@ -1785,13 +1649,6 @@ def main():
             print(f"📈 Using OneCycleLR with computed max_lr: {max_lr_to_use:.2e}, total_steps={total_steps}")
         else:
             print(f"📈 Using OneCycleLR with config max_lr: {max_lr_to_use:.2e}, total_steps={total_steps}")
-    elif USE_COSINE_ANNEALING:
-        # Warmup + cosine annealing for stable convergence
-        warmup_epochs = 3
-        main_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=MAX_EPOCHS-warmup_epochs, eta_min=COSINE_ETA_MIN)
-        warmup_scheduler = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.1, total_iters=warmup_epochs)
-        scheduler = optim.lr_scheduler.SequentialLR(optimizer, [warmup_scheduler, main_scheduler], milestones=[warmup_epochs])
-        print(f"📈 Using Cosine Annealing: T_max={COSINE_T_MAX}, eta_min={COSINE_ETA_MIN}")
     else:
         # Fallback to StepLR
         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
