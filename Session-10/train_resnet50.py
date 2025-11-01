@@ -74,7 +74,8 @@ WEIGHT_DECAY = 1e-4       # Standard weight decay
 GRADIENT_CLIP_VALUE = 1.0 # Gradient clipping for training stability
 
 # Data Augmentation Configuration
-USE_ALBUMENTATIONS = True  # Use Albumentations for data augmentation
+USE_ALBUMENTATIONS = True   # Use Albumentations for superior augmentation quality
+OPTIMIZE_FOR_SPEED = True   # When True, optimizes data loading even with Albumentations
 
 # Logging and Visualization Configuration
 SAVE_DIR = "./results"    # Directory to save results
@@ -157,7 +158,7 @@ class HuggingFaceImageNetDataset(Dataset):
         Args:
             dataset_path: Path to the dataset directory
             split: Dataset split ('train', 'validation', 'test')
-            transform: Torchvision transforms to apply
+            transform: Torchvision or Albumentations transforms to apply
         """
         self.dataset_path = dataset_path
         self.split = split
@@ -230,16 +231,15 @@ class HuggingFaceImageNetDataset(Dataset):
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        # Apply transforms
+        # Apply transforms efficiently based on type
         if self.transform:
             if USE_ALBUMENTATIONS and hasattr(self.transform, '__call__'):
-                # For Albumentations, convert PIL to numpy array
+                # For Albumentations: PIL → numpy → transform → tensor
                 image_array = np.array(image)
-                # Apply Albumentations transform
                 transformed = self.transform(image=image_array)
                 image = transformed['image']
             else:
-                # For torchvision transforms
+                # For torchvision: PIL → transform → tensor
                 image = self.transform(image)
         
         return image, label
@@ -248,35 +248,40 @@ class HuggingFaceImageNetDataset(Dataset):
 # DATA PROCESSING FUNCTIONS
 # ============================================================================
 
-def get_data_transforms() -> Tuple[A.Compose, A.Compose]:
-    """Create training and validation transforms using Albumentations with specified configuration"""
+def get_data_transforms():
+    """Create training and validation transforms with choice between Albumentations and torchvision"""
     
-    # Augmentation configuration
+    # Enhanced augmentation configuration for ImageNet
     AUGMENTATION = { 
         "train": { 
             "resize": 256, 
             "crop": 224, 
             "horizontal_flip": True, 
             "vertical_flip": False, 
-            "rotation": 0, 
+            "rotation": 15,  # Added rotation for Albumentations
             "color_jitter": { 
                 "brightness": 0.2, 
                 "contrast": 0.2, 
                 "saturation": 0.2, 
                 "hue": 0.1 
-            }, 
+            },
+            "cutout": {  # Advanced augmentation for Albumentations
+                "max_holes": 1,
+                "max_height": 16,
+                "max_width": 16,
+                "p": 0.3
+            },
             "normalize": { 
-                "mean": [0.482, 0.457, 0.407], 
-                "std": [0.229, 0.225, 0.226] 
+                "mean": [0.485, 0.456, 0.406],  # Standard ImageNet normalization
+                "std": [0.229, 0.224, 0.225] 
             } 
         }, 
         "val": { 
             "resize": 256, 
             "crop": 224, 
-            "horizontal_flip": False, 
             "normalize": { 
-                "mean": [0.482, 0.457, 0.407], 
-                "std": [0.229, 0.225, 0.226] 
+                "mean": [0.485, 0.456, 0.406],
+                "std": [0.229, 0.224, 0.225] 
             } 
         } 
     }
@@ -285,40 +290,83 @@ def get_data_transforms() -> Tuple[A.Compose, A.Compose]:
     train_config = AUGMENTATION["train"]
     val_config = AUGMENTATION["val"]
     
-    print(f"📊 Using specified augmentation configuration:")
+    if USE_ALBUMENTATIONS:
+        print(f"📊 Using Albumentations transforms (superior augmentation quality):")
+        print(f"   🎨 Advanced augmentations: rotation, cutout, enhanced color transforms")
+        
+        # Albumentations training transforms with advanced augmentations
+        train_transform = A.Compose([
+            A.Resize(height=train_config["resize"], width=train_config["resize"]),
+            A.RandomCrop(height=train_config["crop"], width=train_config["crop"]),
+            A.HorizontalFlip(p=0.5 if train_config["horizontal_flip"] else 0.0),
+            A.Rotate(limit=train_config["rotation"], p=0.3),
+            A.ColorJitter(
+                brightness=train_config["color_jitter"]["brightness"],
+                contrast=train_config["color_jitter"]["contrast"],
+                saturation=train_config["color_jitter"]["saturation"],
+                hue=train_config["color_jitter"]["hue"],
+                p=0.8
+            ),
+            A.CoarseDropout(
+                max_holes=train_config["cutout"]["max_holes"],
+                max_height=train_config["cutout"]["max_height"],
+                max_width=train_config["cutout"]["max_width"],
+                p=train_config["cutout"]["p"]
+            ),
+            A.Normalize(
+                mean=train_config["normalize"]["mean"],
+                std=train_config["normalize"]["std"]
+            ),
+            ToTensorV2()
+        ])
+        
+        # Albumentations validation transforms
+        val_transform = A.Compose([
+            A.Resize(height=val_config["resize"], width=val_config["resize"]),
+            A.CenterCrop(height=val_config["crop"], width=val_config["crop"]),
+            A.Normalize(
+                mean=val_config["normalize"]["mean"],
+                std=val_config["normalize"]["std"]
+            ),
+            ToTensorV2()
+        ])
+        
+    else:
+        print(f"📊 Using torchvision transforms (optimized performance):")
+        print(f"   🚀 Faster data loading with native PyTorch integration")
+        
+        # Torchvision training transforms
+        train_transform = transforms.Compose([
+            transforms.Resize(train_config["resize"]),
+            transforms.RandomCrop(train_config["crop"]),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ColorJitter(
+                brightness=train_config["color_jitter"]["brightness"],
+                contrast=train_config["color_jitter"]["contrast"],
+                saturation=train_config["color_jitter"]["saturation"],
+                hue=train_config["color_jitter"]["hue"]
+            ),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=train_config["normalize"]["mean"],
+                std=train_config["normalize"]["std"]
+            )
+        ])
+        
+        # Torchvision validation transforms
+        val_transform = transforms.Compose([
+            transforms.Resize(val_config["resize"]),
+            transforms.CenterCrop(val_config["crop"]),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=val_config["normalize"]["mean"],
+                std=val_config["normalize"]["std"]
+            )
+        ])
+    
     print(f"   Train - Resize: {train_config['resize']}, Crop: {train_config['crop']}")
     print(f"   Mean: {train_config['normalize']['mean']}")
     print(f"   Std:  {train_config['normalize']['std']}")
-    
-    # Training transforms with augmentation
-    train_transform = A.Compose([
-        A.Resize(height=train_config["resize"], width=train_config["resize"]),
-        A.RandomCrop(height=train_config["crop"], width=train_config["crop"]),
-        A.HorizontalFlip(p=0.5 if train_config["horizontal_flip"] else 0.0),
-        A.ColorJitter(
-            brightness=train_config["color_jitter"]["brightness"],
-            contrast=train_config["color_jitter"]["contrast"],
-            saturation=train_config["color_jitter"]["saturation"],
-            hue=train_config["color_jitter"]["hue"],
-            p=0.8
-        ),
-        A.Normalize(
-            mean=train_config["normalize"]["mean"],
-            std=train_config["normalize"]["std"]
-        ),
-        ToTensorV2()
-    ])
-    
-    # Validation transforms (no augmentation, center crop)
-    val_transform = A.Compose([
-        A.Resize(height=val_config["resize"], width=val_config["resize"]),
-        A.CenterCrop(height=val_config["crop"], width=val_config["crop"]),
-        A.Normalize(
-            mean=val_config["normalize"]["mean"],
-            std=val_config["normalize"]["std"]
-        ),
-        ToTensorV2()
-    ])
     
     return train_transform, val_transform
 
@@ -334,14 +382,41 @@ def create_data_loaders() -> Tuple[DataLoader, DataLoader, int]:
     is_tiny_imagenet = 'tiny-imagenet' in DATASET_PATH.lower()
     
     # Check if it's a Hugging Face dataset (has dataset_dict.json or .arrow files)
-    is_hf_dataset = (
-        os.path.exists(os.path.join(DATASET_PATH, 'dataset_dict.json')) or
-        any(f.endswith('.arrow') for f in os.listdir(DATASET_PATH) if os.path.isfile(os.path.join(DATASET_PATH, f)))
-    )
+    is_hf_dataset = False
+    if os.path.exists(DATASET_PATH):
+        try:
+            files_in_dataset = os.listdir(DATASET_PATH)
+            is_hf_dataset = (
+                'dataset_dict.json' in files_in_dataset or
+                any(f.endswith('.arrow') for f in files_in_dataset) or
+                any(os.path.isdir(os.path.join(DATASET_PATH, f)) and 
+                    any(sf.endswith('.arrow') for sf in os.listdir(os.path.join(DATASET_PATH, f))) 
+                    for f in files_in_dataset if os.path.isdir(os.path.join(DATASET_PATH, f)))
+            )
+        except (OSError, PermissionError) as e:
+            print(f"⚠️  Warning: Could not read dataset directory {DATASET_PATH}: {e}")
+            is_hf_dataset = False
+    else:
+        print(f"❌ Dataset path does not exist: {DATASET_PATH}")
+        raise FileNotFoundError(f"Dataset path not found: {DATASET_PATH}")
+    
+    # Debug: Show what files are in the dataset directory
+    if os.path.exists(DATASET_PATH):
+        try:
+            files_in_dataset = os.listdir(DATASET_PATH)
+            print(f"🔍 Files in dataset directory: {files_in_dataset[:10]}{'...' if len(files_in_dataset) > 10 else ''}")
+        except Exception as e:
+            print(f"⚠️  Could not list files in dataset directory: {e}")
     
     if is_hf_dataset:
         print(f"🔍 Detected dataset format: Hugging Face datasets (Arrow format)")
         print(f"🔍 Dataset type: {'Tiny-ImageNet' if is_tiny_imagenet else 'Full ImageNet'}")
+        
+        # Check if datasets library is available
+        if not HF_DATASETS_AVAILABLE:
+            print("❌ Hugging Face datasets library not available!")
+            print("💡 Install with: pip install datasets")
+            raise ImportError("Hugging Face datasets library required for this dataset format")
         
         # Load Hugging Face datasets
         try:
