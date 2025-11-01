@@ -1616,8 +1616,13 @@ def main():
     computed_max_lr = None
     if args.lr_finder or args.lr_finder_only or args.compute_onecycle_lr:
         print("\n" + "="*60)
+        
+        # Use fewer iterations for large datasets to prevent hanging
+        lr_finder_iterations = 30 if len(train_loader.dataset) > 100000 else 50
+        print(f"   Using {lr_finder_iterations} iterations for LR finder")
+        
         learning_rates, losses, optimal_lr = lr_range_test(
-            model, train_loader, criterion, device, num_iter=50, scaler=scaler
+            model, train_loader, criterion, device, num_iter=lr_finder_iterations, scaler=scaler
         )
         
         # Compute optimal OneCycle max LR if using OneCycleLR
