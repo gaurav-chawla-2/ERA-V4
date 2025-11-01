@@ -197,8 +197,12 @@ class HuggingFaceImageNetDataset(Dataset):
         return image, label
 NUM_CLASSES = 1000  # ImageNet has 1000 classes
 IMAGE_SIZE = 224    # ImageNet uses 224x224 images
-BATCH_SIZE = 32     # Conservative for A100 40GB to avoid OOM - can increase after optimization
+BATCH_SIZE = 64     # Balanced for 224x224 images on A100 40GB
 NUM_WORKERS = 24    # Optimized for high-end instances (26-30 vCPUs available)
+
+# Gradient Accumulation Configuration (simulates larger batch sizes)
+GRADIENT_ACCUMULATION_STEPS = 4  # Effective batch size = BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS
+USE_GRADIENT_ACCUMULATION = True  # Enable gradient accumulation for better convergence
 
 # Training Configuration
 MAX_EPOCHS = 25           # Optimized for OneCycleLR - faster convergence than cosine annealing
@@ -226,7 +230,7 @@ USE_MIXUP = False          # Disable MixUp to keep training simple
 
 # Visualization and Logging
 SAVE_DIR = "./results"    # Directory to save results
-LOG_INTERVAL = 10         # Log every N batches
+LOG_INTERVAL = 50         # Reduced logging frequency for speed (was 10)
 PLOT_FREQUENCY = 5        # Generate plots every N epochs
 VALIDATION_FREQUENCY = 1  # Run validation every epoch
 
@@ -237,11 +241,11 @@ USE_MIXED_PRECISION = True        # Enable automatic mixed precision for faster 
 USE_ONECYCLE_LR = True           # Use OneCycleLR for faster convergence (recommended for budget training)
 USE_COSINE_ANNEALING = False     # Use cosine annealing scheduler (alternative to OneCycleLR)
 
-# OneCycleLR Configuration (optimal for A100 + ImageNet)
-ONECYCLE_MAX_LR = 0.4            # Maximum LR for OneCycleLR (4x base LR for better performance)
-ONECYCLE_PCT_START = 0.3         # Percentage of cycle spent increasing LR (30% warmup)
-ONECYCLE_DIV_FACTOR = 25.0       # Initial LR = max_lr / div_factor
-ONECYCLE_FINAL_DIV_FACTOR = 1e4  # Final LR = initial_lr / final_div_factor
+# OneCycleLR Configuration (optimal for effective batch size 256)
+ONECYCLE_MAX_LR = 0.02           # Optimal for effective batch size 256 (64*4)
+ONECYCLE_PCT_START = 0.25        # Proper warmup for stable convergence
+ONECYCLE_DIV_FACTOR = 20.0       # Conservative initial LR (max_lr/20 = 0.001)
+ONECYCLE_FINAL_DIV_FACTOR = 1e4  # Strong final decay for fine-tuning
 
 # Cosine Annealing Configuration (if USE_COSINE_ANNEALING = True)
 COSINE_T_MAX = 30                 # T_max for cosine annealing (matches MAX_EPOCHS)
