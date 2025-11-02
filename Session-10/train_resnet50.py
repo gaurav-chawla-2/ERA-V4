@@ -1558,7 +1558,7 @@ def setup_logging() -> logging.Logger:
 
 def main():
     """Main training function"""
-    global NUM_CLASSES, INITIAL_LR, BATCH_SIZE, NUM_WORKERS
+    global NUM_CLASSES, INITIAL_LR, BATCH_SIZE, NUM_WORKERS, ONECYCLE_MAX_LR
     import argparse
     
     # Parse command line arguments
