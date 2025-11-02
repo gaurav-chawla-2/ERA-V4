@@ -51,8 +51,8 @@ NUM_CLASSES = 1000  # ImageNet has 1000 classes
 IMAGE_SIZE = 224    # ImageNet uses 224x224 images
 
 # Training Configuration
-BATCH_SIZE = 128    # Optimized for 8x A100 40GB with mixed precision (128 per GPU)
-NUM_WORKERS = 15    # Optimized for 124 vCPUs (15 workers per GPU, 8 GPUs = 120 workers)
+BATCH_SIZE = 128    # Optimized for A100 40GB with mixed precision (better GPU utilization)
+NUM_WORKERS = 16    # Optimized for A100 SXM4 (16 workers for optimal data loading)
 GRADIENT_ACCUMULATION_STEPS = 1  # No accumulation needed with large batch size
 USE_GRADIENT_ACCUMULATION = False  # Disabled - not needed with 8x GPUs and large batch size
 
@@ -68,10 +68,10 @@ LABEL_SMOOTHING = 0.1     # Label smoothing for better generalization
 
 # Optimizer Configuration
 OPTIMIZER_TYPE = 'SGD'    # SGD often works better for full ImageNet
-INITIAL_LR = 0.4          # Scaled for effective batch size 1024 (128*8) using linear scaling rule
+INITIAL_LR = 0.1          # Standard ImageNet LR, will be scaled by batch size (0.1 * 128/256 = 0.05)
 MOMENTUM = 0.9            # Momentum for SGD optimizer
 WEIGHT_DECAY = 1e-4       # Standard weight decay
-GRADIENT_CLIP_VALUE = 1.0 # Gradient clipping for training stability
+GRADIENT_CLIP_VALUE = 1.0 # Standard gradient clipping for ImageNet training
 
 # Data Augmentation Configuration
 USE_ALBUMENTATIONS = True   # Use Albumentations for superior augmentation quality
@@ -89,9 +89,9 @@ USE_MIXED_PRECISION = True        # Enable automatic mixed precision for faster 
 
 # Learning Rate Scheduler Configuration
 USE_ONECYCLE_LR = True           # Use OneCycleLR for faster convergence
-ONECYCLE_MAX_LR = 0.4            # Scaled for effective batch size 1024 (128*8)
+ONECYCLE_MAX_LR = 0.1            # Standard ImageNet max LR, will be scaled by batch size
 ONECYCLE_PCT_START = 0.3         # Longer warmup for large batch size stability
-ONECYCLE_DIV_FACTOR = 25.0       # Conservative initial LR (max_lr/25 = 0.016)
+ONECYCLE_DIV_FACTOR = 25.0       # Standard initial LR (max_lr/25 = 0.002 after scaling)
 ONECYCLE_FINAL_DIV_FACTOR = 1e4  # Strong final decay for fine-tuning
 
 # Checkpoint Configuration
@@ -1612,11 +1612,18 @@ def main():
             NUM_WORKERS = min(16, os.cpu_count())
             print(f"🔧 Mid-range GPU detected. Optimizing: BATCH_SIZE={BATCH_SIZE}, NUM_WORKERS={NUM_WORKERS}")
         
-        # Scale learning rate with batch size (linear scaling rule)
+        # Scale learning rate with batch size (linear scaling rule) - but cap it for safety
         if BATCH_SIZE != original_batch_size:
             lr_scale_factor = BATCH_SIZE / original_batch_size
+            # Cap the scaling to prevent extremely high learning rates
+            lr_scale_factor = min(lr_scale_factor, 2.0)  # Max 2x scaling
+            old_initial_lr = INITIAL_LR
+            old_onecycle_max_lr = ONECYCLE_MAX_LR
             INITIAL_LR = INITIAL_LR * lr_scale_factor
-            print(f"📈 Scaling learning rate: {INITIAL_LR/lr_scale_factor:.2e} → {INITIAL_LR:.2e} (×{lr_scale_factor:.1f})")
+            ONECYCLE_MAX_LR = ONECYCLE_MAX_LR * lr_scale_factor
+            print(f"📈 Scaling learning rates (capped at 2x):")
+            print(f"   Initial LR: {old_initial_lr:.2e} → {INITIAL_LR:.2e} (×{lr_scale_factor:.1f})")
+            print(f"   OneCycle Max LR: {old_onecycle_max_lr:.2e} → {ONECYCLE_MAX_LR:.2e} (×{lr_scale_factor:.1f})")
     else:
         print("⚠️  GPU not detected. Possible issues:")
         print("   - CUDA drivers not installed")
