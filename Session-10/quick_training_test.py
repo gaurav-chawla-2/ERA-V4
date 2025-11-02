@@ -148,7 +148,7 @@ def main():
     print("This script tests if the model starts learning after LR fixes")
     print()
     
-    success = quick_training_test(num_batches=15)
+    success = quick_training_test(num_batches=10)
     
     if success:
         print("\n🎉 SUCCESS: The model appears to be learning!")

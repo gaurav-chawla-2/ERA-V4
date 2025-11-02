@@ -68,7 +68,7 @@ LABEL_SMOOTHING = 0.1     # Label smoothing for better generalization
 
 # Optimizer Configuration
 OPTIMIZER_TYPE = 'SGD'    # SGD often works better for full ImageNet
-INITIAL_LR = 0.1          # Standard ImageNet LR, will be scaled by batch size (0.1 * 128/256 = 0.05)
+INITIAL_LR = 0.05         # Conservative ImageNet LR, will be scaled by batch size (0.05 * 128/256 = 0.025)
 MOMENTUM = 0.9            # Momentum for SGD optimizer
 WEIGHT_DECAY = 1e-4       # Standard weight decay
 GRADIENT_CLIP_VALUE = 1.0 # Standard gradient clipping for ImageNet training
@@ -89,10 +89,10 @@ USE_MIXED_PRECISION = True        # Enable automatic mixed precision for faster 
 
 # Learning Rate Scheduler Configuration
 USE_ONECYCLE_LR = True           # Use OneCycleLR for faster convergence
-ONECYCLE_MAX_LR = 0.1            # Standard ImageNet max LR, will be scaled by batch size
-ONECYCLE_PCT_START = 0.3         # Longer warmup for large batch size stability
-ONECYCLE_DIV_FACTOR = 25.0       # Standard initial LR (max_lr/25 = 0.002 after scaling)
-ONECYCLE_FINAL_DIV_FACTOR = 1e4  # Strong final decay for fine-tuning
+ONECYCLE_MAX_LR = 0.05           # Conservative ImageNet max LR, will be scaled by batch size
+ONECYCLE_PCT_START = 0.4         # Longer warmup for better stability (40% of training)
+ONECYCLE_DIV_FACTOR = 50.0       # Very conservative initial LR (max_lr/50 = 0.0005 after scaling)
+ONECYCLE_FINAL_DIV_FACTOR = 1e3  # Moderate final decay for fine-tuning
 
 # Checkpoint Configuration
 CHECKPOINT_DIR = "./checkpoints"  # Directory to save checkpoints
