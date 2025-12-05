@@ -1,0 +1,2 @@
+Compression ratio: 3.051
+Vocab summary: {'total_tokens': 6000, 'special_tokens': 4, 'separator_tokens': 18, 'seeded_common_chunks': 52}
