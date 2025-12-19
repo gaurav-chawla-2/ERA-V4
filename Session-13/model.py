@@ -111,13 +111,8 @@ class SmolLM2Attention(nn.Module):
         k = torch.repeat_interleave(k, dim=1, repeats=self.num_key_value_groups)
         v = torch.repeat_interleave(v, dim=1, repeats=self.num_key_value_groups)
         
-        attn_weights = torch.matmul(q, k.transpose(2, 3)) / math.sqrt(self.head_dim)
-        
-        if mask is not None:
-            attn_weights = attn_weights + mask
-            
-        attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(q.dtype)
-        attn_output = torch.matmul(attn_weights, v)
+        # Flash Attention
+        attn_output = F.scaled_dot_product_attention(q, k, v, is_causal=True)
         
         attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.hidden_size)
         return self.o_proj(attn_output)
