@@ -232,7 +232,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
 
     GENERATE_EVERY = 500
-    SAVE_EVERY = 5
+    SAVE_EVERY = 50
 
     # Check for checkpoint
     script_dir = os.path.dirname(os.path.abspath(__file__))
