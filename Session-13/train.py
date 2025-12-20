@@ -21,7 +21,7 @@ SEQ_LEN = 128
 LEARNING_RATE = 6e-4 # Slightly higher max LR for cosine schedule
 MIN_LR = 3e-4 # 10% of max LR
 WARMUP_STEPS = 100
-MAX_STEPS = 5000
+MAX_STEPS = 5050
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 MODEL_ID = "HuggingFaceTB/cosmo2-tokenizer"
 
@@ -291,6 +291,13 @@ def main():
     resume_s4 = get_stage_resume_step(start_global_step, 3000, 2000)
     train_stage("Stage 4: Refinement", model, loader_s4, optimizer, criterion, DEVICE, 
                 steps=2000, start_step_offset=3000, tokenizer=tokenizer, generate_every=GENERATE_EVERY, save_every=SAVE_EVERY, resume_from_step=resume_s4)
+
+    # --- Stage 5: Final Polish ---
+    weights_s5 = {'input.txt': 0.4, 'code.txt': 0.3, 'math.txt': 0.3}
+    loader_s5 = get_mixed_dataloader(tokenizer, SEQ_LEN, BATCH_SIZE, weights_s5)
+    resume_s5 = get_stage_resume_step(start_global_step, 5000, 50)
+    train_stage("Stage 5: Final Polish", model, loader_s5, optimizer, criterion, DEVICE, 
+                steps=50, start_step_offset=5000, tokenizer=tokenizer, generate_every=GENERATE_EVERY, save_every=SAVE_EVERY, resume_from_step=resume_s5)
 
     # Save Final Model
     script_dir = os.path.dirname(os.path.abspath(__file__))
