@@ -243,78 +243,49 @@ class DeepSeekMoE(nn.Module):
         # DeepSeek-V3: logits = x @ w + bias
         router_logits = self.router(flat_x) + self.router_bias
         
+        # Select TopK
+        # we still use TopK to determine weights, but we will compute all experts
+        # to avoid MPS synchronization issues with dynamic indexing.
         routing_weights = F.softmax(router_logits, dim=1)
-        routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
+        topk_weights, topk_indices = torch.topk(routing_weights, self.top_k, dim=-1)
         
         # Normalize weights
-        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+        topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
         
-        # DeepSeek-V3 Load Balancing Strategy update (Simplified)
-        # "If an expert is overloaded, decrease bias. If underloaded, increase bias."
-        # We will not implement the synchronized update here for simplicity, 
-        # but this is where the "load-less" balancing logic lives. 
-        # With checking training mode:
+        # Create a full sparse weight matrix [N, NumExperts]
+        # logic: scatter topk_weights into a zero tensor at topk_indices
+        expert_weights = torch.zeros_like(routing_weights)
+        expert_weights.scatter_(1, topk_indices, topk_weights)
+        
+        # Load Balancing Bias Update (Training Only)
         if self.training:
-           # Simple on-the-fly bias update
-           # Target Load = TopK / NumExperts
            target_load = self.top_k / self.num_experts
-           
-           # Current Load (proportion of tokens selecting this expert)
-           # selected_experts is [Batch*Seq, TopK]
-           hot_mask = F.one_hot(selected_experts, num_classes=self.num_experts).float()
-           current_load = hot_mask.sum(dim=(0, 1)) / (batch_size * seq_len) # [NumExperts]
-           
-           # Error
+           # Current load is fraction of tokens that selected this expert
+           # We can check expert_weights > 0
+           current_load = (expert_weights > 0).float().mean(dim=0)
            load_error = current_load - target_load
-           
-           # Update bias (slowly)
-           # DeepSeek uses a hyperparameter. We use a small learning rate for bias.
-           bias_lr = 1e-3 # small update
-           self.router_bias -= bias_lr * torch.sign(load_error)  # "Auxiliary-Loss-Free" means we adjust bias directly.
+           bias_lr = 1e-3 
+           self.router_bias -= bias_lr * torch.sign(load_error)
 
-        final_hidden_states = torch.zeros_like(flat_x)
+        # Dense Execution of Experts (Optimized for MPS/No-Sync)
+        # We run all experts. Since they are small (512), this is equivalent to
+        # running a single MLP of size 8*512 = 4096. 
+        # Session 13 was 1536. So this is ~2.7x slower than S13, but infinitely faster than sync.
         
-        # Expert Capacity could be handled here, but we'll assume sufficient capacity (loop over experts)
-        # For efficiency, typically one would permute tokens. Here we do a simple loop for clarity.
+        # Stacked Expert Execution would be best, but ModuleList is easiest
+        expert_outputs = []
+        for expert in self.routed_experts:
+            expert_outputs.append(expert(flat_x))
+            
+        # Stack: [N, NumExperts, Hidden]
+        expert_outputs = torch.stack(expert_outputs, dim=1)
         
-        # Create a mask for each expert
-        expert_mask = F.one_hot(selected_experts, num_classes=self.num_experts).permute(2, 1, 0) # [NumExperts, TopK, Batch*Seq]
+        # Weighted Sum
+        # weights: [N, NumExperts] -> [N, NumExperts, 1]
+        weighted_expert_output = (expert_outputs * expert_weights.unsqueeze(-1)).sum(dim=1)
         
-        for expert_idx in range(self.num_experts):
-            expert_layer = self.routed_experts[expert_idx]
-            
-            # Find indices where this expert is selected
-            # expert_mask[expert_idx] is [TopK, Batch*Seq]
-            # We need to know which tokens selected this expert. 
-            # A token might select it as 1st or 2nd choice.
-             
-            idx_in_batch = torch.where(expert_mask[expert_idx].any(dim=0))[0]
-            
-            if len(idx_in_batch) == 0:
-                continue
-                
-            # Extract tokens
-            current_state = flat_x[idx_in_batch]
-            
-            # Forward pass
-            expert_out = expert_layer(current_state)
-            
-            # Scale by routing weights
-            # We need the weight assigned to this expert for these tokens.
-            # selected_experts[idx_in_batch] -> [M, TopK]
-            # routing_weights[idx_in_batch] -> [M, TopK]
-            
-            # Find which 'k' selected this expert
-            # shape [M, TopK]
-            is_expert = selected_experts[idx_in_batch] == expert_idx 
-            
-            # weight_for_expert [M, 1]? No, we might select it twice? (Unlikely with TopK)
-            w = (routing_weights[idx_in_batch] * is_expert.float()).sum(dim=1, keepdim=True)
-            
-            final_hidden_states.index_add_(0, idx_in_batch, w * expert_out)
-
         # Combined Result
-        return (shared_output + final_hidden_states).view(batch_size, seq_len, hidden_dim)
+        return (shared_output + weighted_expert_output).view(batch_size, seq_len, hidden_dim)
 
 class DeepSeekBlock(nn.Module):
     def __init__(self, config: DeepSeekConfig):
