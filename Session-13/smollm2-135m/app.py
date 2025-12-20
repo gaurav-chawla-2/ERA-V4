@@ -1,5 +1,4 @@
 import os
-import zipfile
 import torch
 from transformers import AutoTokenizer
 import gradio as gr
@@ -41,7 +40,16 @@ def load_model():
     if os.path.exists(MODEL_PATH):
         print(f"Loading state dict from {MODEL_PATH}")
         state_dict = torch.load(MODEL_PATH, map_location=device)
-        model.load_state_dict(state_dict)
+        
+        # Grubby fix for torch.compile prefixes
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if k.startswith("_orig_mod."):
+                new_state_dict[k[10:]] = v
+            else:
+                new_state_dict[k] = v
+                
+        model.load_state_dict(new_state_dict)
     else:
         print(f"Model file {MODEL_PATH} not found. Please ensure it is uploaded (use Git LFS for large files).")
 

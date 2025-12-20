@@ -1,4 +1,4 @@
 torch
 transformers
-gradio
 numpy
+gradio==4.44.1
