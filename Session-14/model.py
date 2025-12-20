@@ -28,7 +28,7 @@ class DeepSeekConfig:
     num_experts: int = 8
     num_shared_experts: int = 1
     top_k: int = 2
-    moe_intermediate_size: int = 1536 # Inner dimension of experts (usually smaller than dense MLP intermediate if lots of experts, or same)
+    moe_intermediate_size: int = 512 # Reduced from 1536 to match active parameters of dense model (512*3 = 1536)
     
     # Load balancing
     aux_loss_alpha: float = 0.0 # 0 for loss-less
